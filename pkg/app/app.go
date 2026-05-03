@@ -25,6 +25,7 @@ import (
 	"github.com/chrissnell/graywolf/pkg/metrics"
 	"github.com/chrissnell/graywolf/pkg/modembridge"
 	"github.com/chrissnell/graywolf/pkg/packetlog"
+	"github.com/chrissnell/graywolf/pkg/remoteactions"
 	"github.com/chrissnell/graywolf/pkg/stationcache"
 	"github.com/chrissnell/graywolf/pkg/txgovernor"
 	"github.com/chrissnell/graywolf/pkg/updatescheck"
@@ -140,6 +141,11 @@ type App struct {
 	// inbox and into the Actions executor pipeline. nil until wireActions
 	// runs; the rxfanout + IS hooks tolerate nil.
 	actions *actions.Service
+
+	// remoteActions is the outbound-Actions service: macro and remote-OTP
+	// credential CRUD plus the OTP generator. nil until wireRemoteActions
+	// runs; webapi handlers fall back to 503 when nil.
+	remoteActions *remoteactions.Service
 
 	// resolvedModem is the absolute path to the graywolf-modem binary
 	// after running through ResolveModemPath. Retained so diagnostic

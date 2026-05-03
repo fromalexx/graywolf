@@ -37,6 +37,7 @@ import (
 	"github.com/chrissnell/graywolf/pkg/modembridge"
 	"github.com/chrissnell/graywolf/pkg/packetlog"
 	"github.com/chrissnell/graywolf/pkg/pttdevice"
+	"github.com/chrissnell/graywolf/pkg/remoteactions"
 	"github.com/chrissnell/graywolf/pkg/stationcache"
 	"github.com/chrissnell/graywolf/pkg/txgovernor"
 	"github.com/chrissnell/graywolf/pkg/updatescheck"
@@ -422,6 +423,13 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	// is hooked into the rxfanout + IS paths in dispatchRxFrame and
 	// onIGateIsRxPacket.
 	if err := a.wireActions(ctx); err != nil {
+		return err
+	}
+
+	// --- Outbound Actions service -------------------------------------
+	// Owns macro + remote-OTP credential CRUD. Failure is non-fatal;
+	// webapi handlers fall back to 503 when a.remoteActions stays nil.
+	if err := a.wireRemoteActions(ctx); err != nil {
 		return err
 	}
 
@@ -832,6 +840,26 @@ func (a *App) wireActions(ctx context.Context) error {
 	return nil
 }
 
+// wireRemoteActions constructs the outbound-Actions service. Failure
+// is non-fatal (matches wireActions); the REST handlers fall back to
+// 503 when a.remoteActions is nil.
+//
+// Ordering: runs after wireActions because both touch the same DB,
+// keeping the wireup chain visually grouped. There is no runtime
+// dependency on the inbound actions service.
+func (a *App) wireRemoteActions(ctx context.Context) error {
+	svc, err := remoteactions.NewService(remoteactions.ServiceConfig{
+		DB:     a.store.DB(),
+		Logger: a.logger.With("component", "remoteactions"),
+	})
+	if err != nil {
+		a.logger.Error("remoteactions service init", "err", err)
+		return nil
+	}
+	a.remoteActions = svc
+	return nil
+}
+
 // wireAGW constructs a.agwServer from configstore. A disabled or
 // missing AGW config leaves a.agwServer nil. The agwReload channel is
 // created unconditionally so an initially-disabled AGW can be toggled
@@ -1014,6 +1042,13 @@ func (a *App) wireHTTP(ctx context.Context) error {
 	// the test-fire endpoint returns 503.
 	if a.actions != nil {
 		apiSrv.SetActionsService(a.actions)
+	}
+
+	// Outbound Actions: macro + remote-OTP credential CRUD plus the
+	// OTP generator. Nil disables the /api/remote-actions/* endpoints
+	// (handlers return 503 via requireRemoteActions).
+	if a.remoteActions != nil {
+		apiSrv.SetRemoteActions(a.remoteActions)
 	}
 
 	// Construct the GitHub-update checker and install it on the webapi
