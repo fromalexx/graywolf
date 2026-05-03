@@ -23,6 +23,7 @@ roles.
 - [`invariants.md`](invariants.md) -- cross-cutting "if X then also Y" rules with reasons.
 - [`glossary.md`](glossary.md) -- domain terms as graywolf uses them, with source pointers.
 - [`actions.md`](actions.md) -- the `@@`-prefixed APRS Actions subsystem: trigger surface, classifier topology, source-aware reply, lifecycle, schema.
+- [`remote-actions.md`](remote-actions.md) -- outbound Actions: macro + remote-OTP credential CRUD; the Messages drawer that fires `@@<otp>#<action>` at remote stations.
 
 ## Maintenance
 

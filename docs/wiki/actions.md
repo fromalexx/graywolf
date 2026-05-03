@@ -227,3 +227,6 @@ results.
 - The `@@` sentinel is the sole hot-path discriminator; if you add
   another trigger, update this page and `pkg/actions/classifier.go`
   in the same change.
+- Outbound counterpart (macro/credential CRUD + Messages drawer):
+  [`remote-actions.md`](remote-actions.md). The two subsystems share
+  only `parser.go` (exported `ValidActionName`, `MaxActionNameLen`).
