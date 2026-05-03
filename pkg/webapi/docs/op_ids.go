@@ -358,3 +358,26 @@ const (
 	OpDeleteMapsDownload    = "deleteMapsDownload"
 	OpGetMapsCatalog        = "getMapsCatalog"
 )
+
+// Actions resource — /api/actions and friends. Remote command system
+// with OTP-gated execution, listener bindings (RF/IS triggers), audit
+// log of invocations, and a test-fire endpoint for the operator UI.
+// OTP credentials live under /api/otp-credentials and are consumed by
+// per-Action otp_required gating.
+const (
+	OpListActions              = "listActions"
+	OpCreateAction             = "createAction"
+	OpGetAction                = "getAction"
+	OpUpdateAction             = "updateAction"
+	OpDeleteAction             = "deleteAction"
+	OpTestFireAction           = "testFireAction"
+	OpListActionListeners      = "listActionListeners"
+	OpCreateActionListener     = "createActionListener"
+	OpDeleteActionListener     = "deleteActionListener"
+	OpListActionInvocations    = "listActionInvocations"
+	OpClearActionInvocations   = "clearActionInvocations"
+	OpListOTPCredentials       = "listOTPCredentials"
+	OpCreateOTPCredential      = "createOTPCredential"
+	OpGetOTPCredential         = "getOTPCredential"
+	OpDeleteOTPCredential      = "deleteOTPCredential"
+)
