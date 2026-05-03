@@ -19,12 +19,24 @@
 
   let { target, maxLen = 67, onFire = async () => {}, onSaveAsMacro = () => {} } = $props();
 
-  let credId = $state(remoteActionsStore.defaultCredFor(target));
+  let credId = $state(null);
   let cmd = $state('');
   let manualOtp = $state('');
   let code = $state('');
   let secs = $state(0);
   let firing = $state(false);
+
+  // Re-prime the credential picker default whenever target changes.
+  // Capturing remoteActionsStore.defaultCredFor(target) directly inside
+  // $state would freeze at mount-time (Svelte 5 state_referenced_locally
+  // warning) and never advance when the operator switches DM threads.
+  let lastTarget = null;
+  $effect.pre(() => {
+    if (target !== lastTarget) {
+      credId = remoteActionsStore.defaultCredFor(target);
+      lastTarget = target;
+    }
+  });
 
   // Split cmd into actionName + argsString at the first space.
   const parsed = $derived.by(() => {

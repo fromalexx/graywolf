@@ -16,10 +16,26 @@
     onMoveDown = () => {},
   } = $props();
 
-  let label = $state(macro.label ?? '');
-  let actionName = $state(macro.action_name ?? '');
-  let argsString = $state(macro.args_string ?? '');
-  let credId = $state(macro.remote_otp_credential_id ?? null);
+  let label = $state('');
+  let actionName = $state('');
+  let argsString = $state('');
+  let credId = $state(null);
+
+  // Re-snapshot editable fields whenever the bound macro identity
+  // changes. Plain `$state(macro.label ?? '')` would freeze at the
+  // initial prop value (Svelte 5 state_referenced_locally warning) and
+  // never reflect server refreshes / row re-binds.
+  let lastSeenId = null;
+  $effect.pre(() => {
+    const id = macro?.id ?? null;
+    if (id !== lastSeenId) {
+      label = macro?.label ?? '';
+      actionName = macro?.action_name ?? '';
+      argsString = macro?.args_string ?? '';
+      credId = macro?.remote_otp_credential_id ?? null;
+      lastSeenId = id;
+    }
+  });
 
   function commit() {
     onChange({
@@ -34,7 +50,7 @@
   $effect(() => {
     // Propagate credential changes immediately since the picker has no
     // blur event to gate on.
-    if (credId !== (macro.remote_otp_credential_id ?? null)) {
+    if (credId !== (macro?.remote_otp_credential_id ?? null)) {
       onChange({
         ...macro,
         label,
