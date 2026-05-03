@@ -1423,6 +1423,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/remote-actions/macros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List remote action macros for one target */
+        get: operations["listRemoteActionMacros"];
+        put?: never;
+        /** Create remote action macro */
+        post: operations["createRemoteActionMacro"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-actions/macros/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder remote action macros for one target */
+        post: operations["reorderRemoteActionMacros"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-actions/macros/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update remote action macro */
+        put: operations["updateRemoteActionMacro"];
+        post?: never;
+        /** Delete remote action macro */
+        delete: operations["deleteRemoteActionMacro"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/smart-beacon": {
         parameters: {
             query?: never;
@@ -2629,6 +2682,17 @@ export interface components {
             last_seen?: string;
             notes?: components["schemas"]["dto.ReleaseNoteDTO"][];
             schema_version?: number;
+        };
+        "dto.RemoteActionMacro": {
+            action_name?: string;
+            args_string?: string;
+            created_at?: string;
+            id?: number;
+            label?: string;
+            position?: number;
+            remote_otp_credential_id?: number;
+            target_call?: string;
+            updated_at?: string;
         };
         "dto.RemoteOTPCredential": {
             algorithm?: string;
@@ -8512,6 +8576,141 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["webtypes.ErrorResponse"];
                 };
+            };
+        };
+    };
+    listRemoteActionMacros: {
+        parameters: {
+            query: {
+                /** @description Target callsign (uppercased server-side) */
+                target: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["dto.RemoteActionMacro"][];
+                };
+            };
+        };
+    };
+    createRemoteActionMacro: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["dto.RemoteActionMacro"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+        };
+    };
+    reorderRemoteActionMacros: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+        };
+    };
+    updateRemoteActionMacro: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["dto.RemoteActionMacro"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteRemoteActionMacro: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

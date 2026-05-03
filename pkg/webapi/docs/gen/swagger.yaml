@@ -1799,6 +1799,27 @@ definitions:
       schema_version:
         type: integer
     type: object
+  dto.RemoteActionMacro:
+    properties:
+      action_name:
+        type: string
+      args_string:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      position:
+        type: integer
+      remote_otp_credential_id:
+        type: integer
+      target_call:
+        type: string
+      updated_at:
+        type: string
+    type: object
   dto.RemoteOTPCredential:
     properties:
       algorithm:
@@ -6444,6 +6465,91 @@ paths:
           schema:
             $ref: '#/definitions/webtypes.ErrorResponse'
       summary: Update remote OTP credential
+      tags:
+        - remote-actions
+  /remote-actions/macros:
+    get:
+      operationId: listRemoteActionMacros
+      parameters:
+        - description: Target callsign (uppercased server-side)
+          in: query
+          name: target
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/dto.RemoteActionMacro'
+            type: array
+      summary: List remote action macros for one target
+      tags:
+        - remote-actions
+    post:
+      consumes:
+        - application/json
+      operationId: createRemoteActionMacro
+      produces:
+        - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.RemoteActionMacro'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/webtypes.ErrorResponse'
+      summary: Create remote action macro
+      tags:
+        - remote-actions
+  /remote-actions/macros/{id}:
+    delete:
+      operationId: deleteRemoteActionMacro
+      responses:
+        "204":
+          description: No Content
+      summary: Delete remote action macro
+      tags:
+        - remote-actions
+    put:
+      consumes:
+        - application/json
+      operationId: updateRemoteActionMacro
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RemoteActionMacro'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/webtypes.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/webtypes.ErrorResponse'
+      summary: Update remote action macro
+      tags:
+        - remote-actions
+  /remote-actions/macros/reorder:
+    post:
+      consumes:
+        - application/json
+      operationId: reorderRemoteActionMacros
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/webtypes.ErrorResponse'
+      summary: Reorder remote action macros for one target
       tags:
         - remote-actions
   /smart-beacon:

@@ -5962,6 +5962,135 @@
                 }
             }
         },
+        "/remote-actions/macros": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remote-actions"
+                ],
+                "summary": "List remote action macros for one target",
+                "operationId": "listRemoteActionMacros",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Target callsign (uppercased server-side)",
+                        "name": "target",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/dto.RemoteActionMacro"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remote-actions"
+                ],
+                "summary": "Create remote action macro",
+                "operationId": "createRemoteActionMacro",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dto.RemoteActionMacro"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/webtypes.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/remote-actions/macros/reorder": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remote-actions"
+                ],
+                "summary": "Reorder remote action macros for one target",
+                "operationId": "reorderRemoteActionMacros",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/webtypes.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/remote-actions/macros/{id}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remote-actions"
+                ],
+                "summary": "Update remote action macro",
+                "operationId": "updateRemoteActionMacro",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.RemoteActionMacro"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/webtypes.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/webtypes.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "remote-actions"
+                ],
+                "summary": "Delete remote action macro",
+                "operationId": "deleteRemoteActionMacro",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/smart-beacon": {
             "get": {
                 "security": [
@@ -9219,6 +9348,38 @@
                 },
                 "schema_version": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.RemoteActionMacro": {
+            "type": "object",
+            "properties": {
+                "action_name": {
+                    "type": "string"
+                },
+                "args_string": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "remote_otp_credential_id": {
+                    "type": "integer"
+                },
+                "target_call": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
