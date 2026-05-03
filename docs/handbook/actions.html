@@ -37,6 +37,7 @@
       <a href="igate.html">iGate</a>
       <a href="messaging.html">Messaging</a>
       <a href="actions.html">Actions</a>
+      <a href="remote-actions.html">Remote Actions</a>
       <a href="livemap.html">Live Map</a>
       <div class="sidebar-section">Packet</div>
       <a href="ax25-terminal.html">AX.25 Terminal</a>
@@ -530,6 +531,15 @@ https://hass.local:8123/api/services/light/turn_on?room={{arg.room}}
       single-operator station.
     </p>
 
+    <p class="note">
+      <strong>Want to fire these from another graywolf?</strong> Copy
+      the <strong>Secret Key</strong> shown in the reveal panel into
+      the receiving operator&rsquo;s Messages &rarr; Remote Actions
+      drawer (Manage secrets &rarr; New Secret &rarr; Secret Key).
+      Same string, two sides. See
+      <a href="remote-actions.html">Remote Actions</a>.
+    </p>
+
     <h2>Authenticator apps</h2>
 
     <p>
@@ -843,9 +853,9 @@ https://hass.local:8123/api/services/light/turn_on?room={{arg.room}}
         <span class="label">Previous</span>
         Messaging
       </a>
-      <a href="livemap.html" class="next">
+      <a href="remote-actions.html" class="next">
         <span class="label">Next</span>
-        Live Map
+        Remote Actions
       </a>
     </nav>
   </main>

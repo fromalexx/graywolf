@@ -37,6 +37,7 @@
       <a href="igate.html">iGate</a>
       <a href="messaging.html">Messaging</a>
       <a href="actions.html">Actions</a>
+      <a href="remote-actions.html">Remote Actions</a>
       <a href="livemap.html">Live Map</a>
       <div class="sidebar-section">Packet</div>
       <a href="ax25-terminal.html">AX.25 Terminal</a>
@@ -326,6 +327,23 @@
       Stations on stricter clients may truncate or drop anything past 67
       bytes, so leave it off unless you&rsquo;ve confirmed it works on
       both ends.
+    </p>
+
+    <h2>Firing remote Actions from a thread</h2>
+
+    <p>
+      DM threads show a zap icon (<span class="kbd">&#9889;</span>) in
+      the thread header. Tapping it opens the
+      <a href="remote-actions.html">Remote Actions</a> drawer: a
+      side-panel for firing operator-curated
+      <code>@@&lt;otp&gt;#&lt;action&gt;</code> macros at the remote
+      station whose callsign owns the thread. Inbound replies that
+      arrive within 60 seconds of an outbound fire and start with a
+      status keyword (<code>ok</code>, <code>error</code>,
+      <code>bad_otp</code>, ...) get a small zap badge in the bubble
+      footer so you can correlate the reply with what you sent. The
+      icon is omitted on tactical (multi-recipient) threads, where an
+      OTP-protected fire to many callsigns at once would be a footgun.
     </p>
 
     <h2>Edge cases</h2>
