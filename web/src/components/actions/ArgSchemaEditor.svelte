@@ -151,10 +151,12 @@
           </div>
         </div>
       {/each}
+    {:else}
+      <p class="empty">No allowed args defined yet. Add one for each key the sender may pass.</p>
     {/if}
 
     <div class="add-row">
-      <Button size="sm" variant="ghost" onclick={addRow}>+ Add arg</Button>
+      <Button variant="default" onclick={addRow}>+ Add allowed arg</Button>
     </div>
 
     <p class="explainer">
@@ -193,7 +195,13 @@
     text-align: right;
   }
   .add-row {
-    margin-top: 2px;
+    margin-top: 6px;
+  }
+  .empty {
+    margin: 4px 0 6px;
+    font-size: 12px;
+    color: var(--color-text-muted, var(--text-muted));
+    font-style: italic;
   }
   .freeform-row {
     display: grid;

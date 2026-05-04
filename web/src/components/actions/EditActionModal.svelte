@@ -358,7 +358,6 @@
         </div>
 
         <div class="field">
-          <span class="label">Allowed args</span>
           <ArgModeSelect bind:value={form.arg_mode} />
           <ArgSchemaEditor
             bind:argSchema={form.arg_schema}
@@ -486,7 +485,6 @@
         {/if}
 
         <div class="field">
-          <span class="label">Allowed args</span>
           <ArgModeSelect bind:value={form.arg_mode} />
           <ArgSchemaEditor
             bind:argSchema={form.arg_schema}
