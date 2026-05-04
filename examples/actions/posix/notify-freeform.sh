@@ -15,13 +15,20 @@
 
 set -euo pipefail
 
-# Positional args captured by name for clarity; only SENDER and MESSAGE are used.
+# Positional args captured by name for clarity.
 # shellcheck disable=SC2034
 ACTION="$1"
 SENDER="$2"
-# shellcheck disable=SC2034
 OTP_VERIFIED="$3"
 MESSAGE="$4"
+
+# Defense in depth: refuse if the runtime did not verify an OTP.
+# Push notifications are sent to a single operator so this is less
+# critical than SMS, but the pattern keeps the example honest.
+if [[ "$OTP_VERIFIED" != "true" ]]; then
+    echo "otp required" >&2
+    exit 65
+fi
 
 # Revalidate. Even though the Action regex should already catch this,
 # this script's safety contract should not depend on operator

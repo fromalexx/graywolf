@@ -41,6 +41,9 @@ CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 # ---- App --------------------------------------------------------------
 
 app = Flask(__name__)
+# Cap request bodies at the Werkzeug layer too, so chunked transfer
+# encoding (no Content-Length header) still gets bounded.
+app.config["MAX_CONTENT_LENGTH"] = MAX_BODY_BYTES
 
 
 def init_db() -> None:
@@ -84,8 +87,11 @@ def revalidate(value: str) -> None:
 def cap_body_size() -> None:
     """Reject oversize bodies before parsing them.
 
-    Werkzeug's ``MAX_CONTENT_LENGTH`` setting also enforces this, but
-    setting it AND failing fast in middleware double-locks the door.
+    Werkzeug's ``MAX_CONTENT_LENGTH`` (set above) is the load-bearing
+    cap; this middleware runs first and rejects requests that
+    advertise an oversize Content-Length without ever reading the
+    body, which is friendlier on the network for obviously-huge
+    requests.
     """
     cl = request.content_length
     if cl is not None and cl > MAX_BODY_BYTES:
@@ -104,7 +110,7 @@ def aprs_webhook():
     sender = form.get("sender_callsign", "")
     otp_verified = form.get("otp_verified", "false") == "true"
     source = form.get("source", "")
-    payload = form.get("arg", form.get("text", ""))  # 'arg' for freeform; 'text' historical
+    payload = form.get("arg", "")  # graywolf's freeform key
 
     # ---- Revalidate -------------------------------------------------
     for v in (action, sender, source, payload):

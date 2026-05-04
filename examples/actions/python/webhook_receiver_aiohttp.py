@@ -44,7 +44,7 @@ async def handle(request: web.Request) -> web.Response:
     action = str(form.get("action", ""))
     sender = str(form.get("sender_callsign", ""))
     source = str(form.get("source", ""))
-    payload = str(form.get("arg") or form.get("text") or "")
+    payload = str(form.get("arg") or "")
 
     for v in (action, sender, source, payload):
         revalidate(v)

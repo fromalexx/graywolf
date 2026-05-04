@@ -29,14 +29,24 @@
 
 set -euo pipefail
 
-# Positional args captured by name for clarity; only PAYLOAD is used here.
+# Positional args captured by name for clarity.
 # shellcheck disable=SC2034
 ACTION="$1"
 # shellcheck disable=SC2034
 SENDER="$2"
-# shellcheck disable=SC2034
 OTP_VERIFIED="$3"
 PAYLOAD="$4"
+
+# --- 0. Refuse without a verified OTP --------------------------------
+#
+# SMS sends are exactly the surface that should require the per-Action
+# OTP toggle to be set. The runtime should not have invoked us if OTP
+# was missing -- this is defense in depth so the script's contract
+# does not depend on operator configuration.
+if [[ "$OTP_VERIFIED" != "true" ]]; then
+    echo "otp required" >&2
+    exit 65
+fi
 
 # --- 1. Validate + split in one regex ---------------------------------
 #
@@ -107,10 +117,12 @@ response=$(curl -sS --max-time 8 -X POST \
     -u "${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}" \
     -- "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json")
 
-# Cheap success heuristic: Twilio returns a JSON document with a "sid"
-# field on success. We don't pull in jq because not every operator has
-# it; grep is enough for a one-line reply.
-if printf '%s' "$response" | grep -q '"sid"'; then
+# Twilio Message SIDs are documented to start with "SM". Match the
+# full prefix instead of just any "sid" key, so error bodies that
+# mention subaccount_sid / application_sid don't false-positive as
+# success. We don't pull in jq because not every operator has it;
+# grep is enough for a one-line reply.
+if printf '%s' "$response" | grep -q '"sid":"SM'; then
     sid=$(printf '%s' "$response" | grep -o '"sid":"SM[A-Za-z0-9]*"' | head -n1 | sed 's/.*"\(SM[^"]*\)"/\1/')
     echo "sent ${sid:-?}"
     exit 0
