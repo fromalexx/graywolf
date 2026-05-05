@@ -1,6 +1,6 @@
 <script>
   // CredentialPicker -- dropdown over the credentials cache + a final
-  // "None (enter OTP at fire time)" option + an inline "Manage
+  // "None" option (no OTP, or enter at fire time) + an inline "Manage
   // secrets..." link that opens the credentials modal.
   //
   // Bound `value` is the credential id (number) or null for None. The
@@ -21,7 +21,7 @@
       .slice()
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
       .map((c) => ({ value: String(c.id), label: c.name })),
-    { value: NONE, label: 'None (enter OTP at fire time)' },
+    { value: NONE, label: 'None (no OTP, or enter at fire time)' },
   ]);
 
   const stringValue = $derived(value == null ? NONE : String(value));

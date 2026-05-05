@@ -53,11 +53,15 @@
   const wireLen = $derived(wire.length);
   const overBudget = $derived(wireLen > maxLen);
 
+  // Manual-OTP rule: empty (no OTP) is allowed; partial 1-5 digits is
+  // not. With a credential bound we still wait for the auto-fetched
+  // code so the operator never sends a stale one.
+  const manualOtpOk = $derived(manualOtp === '' || /^[0-9]{6}$/.test(manualOtp));
   const canFire = $derived(
     !firing &&
       parsed.actionName.length > 0 &&
       !overBudget &&
-      (credId != null ? code.length === 6 : /^[0-9]{6}$/.test(manualOtp)),
+      (credId != null ? code.length === 6 : manualOtpOk),
   );
 
   $effect(() => {
@@ -111,33 +115,35 @@
   </div>
   {#if credId == null}
     <div class="field">
-      <label for="ff-otp">OTP (6 digits)</label>
+      <label for="ff-otp">OTP (6 digits, optional)</label>
       <Input id="ff-otp" bind:value={manualOtp} maxlength={6} />
+      <p class="hint">Leave blank if the remote action does not require OTP.</p>
     </div>
   {:else}
     <p class="otp" data-testid="otp-line">OTP <strong>{code || '------'}</strong> . next {secs}s</p>
   {/if}
 
-  <button type="button" class="save-link" onclick={saveAsMacro} disabled={parsed.actionName.length === 0}>
-    Save as macro...
-  </button>
-
   <div class="send-row">
     <span class="len" class:over={overBudget}>{wireLen} / {maxLen}</span>
-    {#if overBudget}
-      <Tooltip>
-        <Tooltip.Trigger>
-          <Button variant="primary" class="send-action-btn" disabled>
-            <span class="bolt" aria-hidden="true">⚡</span> SEND ACTION
-          </Button>
-        </Tooltip.Trigger>
-        <Tooltip.Content>Line exceeds APRS budget. Shorten args or shorten action name.</Tooltip.Content>
-      </Tooltip>
-    {:else}
-      <Button variant="primary" class="send-action-btn" disabled={!canFire} onclick={fire}>
-        <span class="bolt" aria-hidden="true">⚡</span> SEND ACTION
+    <div class="send-actions">
+      <Button variant="secondary" class="save-macro-btn" onclick={saveAsMacro} disabled={parsed.actionName.length === 0}>
+        SAVE AS MACRO
       </Button>
-    {/if}
+      {#if overBudget}
+        <Tooltip>
+          <Tooltip.Trigger>
+            <Button variant="primary" class="send-action-btn" disabled>
+              <span class="bolt" aria-hidden="true">⚡</span> SEND ACTION
+            </Button>
+          </Tooltip.Trigger>
+          <Tooltip.Content>Line exceeds APRS budget. Shorten args or shorten action name.</Tooltip.Content>
+        </Tooltip>
+      {:else}
+        <Button variant="primary" class="send-action-btn" disabled={!canFire} onclick={fire}>
+          <span class="bolt" aria-hidden="true">⚡</span> SEND ACTION
+        </Button>
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -154,9 +160,8 @@
   }
   .hint { margin: 0; font-size: 11px; color: var(--color-text-muted, var(--text-muted)); }
   .otp { font-family: var(--font-mono); font-size: 0.875rem; margin: 0; color: var(--color-text-muted); }
-  .save-link { background: transparent; border: none; color: var(--color-primary); font-size: 0.8125rem; cursor: pointer; padding: 0; align-self: flex-start; }
-  .save-link:disabled { color: var(--color-text-dim); cursor: not-allowed; }
   .send-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .send-actions { display: flex; align-items: center; gap: 8px; }
   .len { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted); }
   .len.over { color: var(--color-danger); }
   .bolt {
@@ -176,6 +181,20 @@
     border-color: #1f86b3 !important;
   }
   :global(.send-action-btn:disabled) {
+    opacity: 0.55;
+  }
+  :global(.save-macro-btn) {
+    background: var(--color-surface-raised, #2a2a2a) !important;
+    color: var(--color-text, #e0e0e0) !important;
+    border: 1px solid var(--color-border, #4a4a4a) !important;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  :global(.save-macro-btn:hover:not(:disabled)) {
+    background: var(--color-surface-hover, #3a3a3a) !important;
+    border-color: var(--color-primary) !important;
+  }
+  :global(.save-macro-btn:disabled) {
     opacity: 0.55;
   }
 </style>

@@ -68,7 +68,7 @@
     firingByMacro = { ...firingByMacro, [m.id]: true };
     try {
       let otp = '';
-      let nextBoundaryMs = Date.now() + 30_000;
+      let nextBoundaryMs = 0; // 0 = no cooldown (no OTP step to wait for)
       if (m.remote_otp_credential_id != null) {
         const { data, error } = await remoteOtpApi.generate(m.remote_otp_credential_id);
         if (error || !data) {
@@ -77,13 +77,12 @@
         }
         otp = data.code;
         nextBoundaryMs = new Date(data.expires_at).getTime();
-      } else {
-        // Manual OTP not supported on bare macro tap; the operator must
-        // promote the macro to free-form (Save as macro path) or remove
-        // its credential binding via edit mode then enter the OTP there.
-        toast('Macro has no credential. Edit it to add one or use the free-form sender.', 'warning');
-        return;
       }
+      // No credential bound = fire with empty OTP. Receiver enforces
+      // per-Action OTPRequired; if the remote action needs a code, the
+      // peer will reply bad_otp:missing and the operator can rebind a
+      // credential via edit mode. No replay-ring concern without OTP,
+      // so no cooldown either.
       try {
         await sendActionFire({
           target,
@@ -92,8 +91,12 @@
           argsString: m.args_string,
           sendMessage,
         });
-        cooldownByMacro = { ...cooldownByMacro, [m.id]: nextBoundaryMs };
-        remoteActionsStore.rememberCredForTarget(target, m.remote_otp_credential_id);
+        if (nextBoundaryMs > 0) {
+          cooldownByMacro = { ...cooldownByMacro, [m.id]: nextBoundaryMs };
+        }
+        if (m.remote_otp_credential_id != null) {
+          remoteActionsStore.rememberCredForTarget(target, m.remote_otp_credential_id);
+        }
       } catch (e) {
         toast(`Fire failed: ${e?.message ?? e}`, 'error');
       }
