@@ -4,15 +4,15 @@
 
 Graywolf is a modern APRS station with a software modem, digipeater, iGate, and web UI. It bundles everything you need to put an APRS station on the air — from raw audio demodulation to APRS-IS gating — and makes it easy with a browser-based configuration interface. 
 
-**⬇️ [Download the Latest Release](https://github.com/chrissnell/graywolf/releases/latest)** — prebuilt for Linux (Debian/Ubuntu and Fedora/RHEL), macOS, and Windows.
+** [Download the Latest Release](https://github.com/chrissnell/graywolf/releases/latest)** — prebuilt for Linux (Debian/Ubuntu and Fedora/RHEL), macOS, and Windows.
 
-**📖 [Read the Handbook](https://chrissnell.com/software/graywolf/)** — installation, configuration, operation guide, and REST API reference.
+** [Read the Handbook](https://chrissnell.com/software/graywolf/)** — installation, configuration, operation guide, and REST API reference.
 
-**🔧 [Known-Working Configurations](https://chrissnell.com/software/graywolf/configurations.html)** — community-tested hardware setups with exact settings. Check here for your device, and submit a PR if yours isn't listed.
+** [Known-Working Configurations](https://chrissnell.com/software/graywolf/configurations.html)** — community-tested hardware setups with exact settings. Check here for your device, and submit a PR if yours isn't listed.
 
-**💬 [Graywolf APRS Discord](https://discord.gg/3r5brb7mjV)** — community chat for help, discussion, and development.
+** [Graywolf APRS Discord](https://discord.gg/3r5brb7mjV)** — community chat for help, discussion, and development.
 
-🌎 Graywolf is used all around the world! [See a map of currently active stations](https://graywolf-users.nw5w.com/)
+Graywolf is used all around the world! **[See a map of currently active stations](https://graywolf-users.nw5w.com/)**
 
 Written by Chris Snell, [NW5W](https://nw5w.com). 
 
@@ -41,23 +41,22 @@ Reproduce with `./bench.sh`.
   <img src="docs/handbook/img/dashboard.png" alt="Graywolf dashboard" width="800">
 </p>
 
-- **Modern Web UI** - Configure and monitor your station from your browser, with live packet logs and preset-driven setup for digipeater and iGate
+- **Modern Web UI** - GW is managed via the browser, with a responsive interface that works well on desktops and smartphones. 
 
-- **Live Map** - Real-time APRS map with trails, weather overlays, APRS-IS layer, and station popups, rendered on a high-fidelity vector basemap with optional offline regional bundles
+- **Software Modem** - High performance DSP written in Rust that's slightly more effective than Direwolf and much better than most hardware TNCs.  Efficeint: uses about 19% of a single CPU core on a Raspberry Pi 5.
+
+- **Live Map** - Like having a private aprs.fi for your station.  Real-time APRS map with trails, digipeater paths, weather overlays, etc., rendered on our private vector basemap.  You can download maps for your state/province/country for offline use!
 
 - **Messages** - SMS-style APRS messaging with delivery status and unread badges
 
   - Direct messages with auto-ACK and retry
-  - Tactical callsigns (e.g. `SLCTAC`, `AMIGOS`) for group nets
+  - Tactical callsigns (e.g. `GRAYWOLF`, `AMIGOS`) for group nets
   - RF-first delivery with APRS-IS fallback
-  - Opt-in long messages up to 200 characters
+  - Long messages up to 200 characters
 
-- **Software Modem** - Native Rust DSP, no external sound card tooling required
-
-  - AFSK 1200 baud (Bell 202)
-  - 9600 baud G3RUH
-  - PSK
-  - FX.25 and IL2P forward error correction
+- **Actions** - Trigger scripts remotely with specially-crafted APRS messages
+  - Can trigger via shell script, Powershell script, or webhook
+  - Can be secured with one-time passwords a la Google Authenticator or 1Password
 
 - **Push-to-Talk** - Multiple PTT methods for any setup
 
@@ -81,7 +80,7 @@ Reproduce with `./bench.sh`.
 
 - **TNC Interfaces** - Speak the protocols other packet software expects
 
-  - KISS TNC (serial and TCP)
+  - KISS TNC (TCP built in; serial via [tnc-server](https://github.com/chrissnell/tnc-server))
   - AGWPE TCP interface
 
 - **Beacons and GPS** - Position reporting made easy
@@ -93,12 +92,13 @@ Reproduce with `./bench.sh`.
 - **Observability**
 
   - [Prometheus](https://prometheus.io/) metrics
-  - Packet logging to SQLite
+  - Packet logging to SQLite database, with search ability
   - Live packet stream in the web UI
 
 - **Simple installation** - single binary, SQLite config database
 
   - systemd service unit
   - Debian/Ubuntu (APT), Red Hat (RPM), and Arch (AUR) packages
-  - Windows installer (NSIS)
+  - Windows installer
+  - macOS binaries
   - Runs on x86-64 and ARM (Raspberry Pi)
