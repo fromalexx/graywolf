@@ -7,6 +7,17 @@
 # route the body references via [text](link) markdown; renderer only
 # accepts internal #/... routes.
 
+- version: "0.13.2"
+  date: "2026-05-06"
+  style: info
+  schema_version: 1
+  title: "Messages: fix outbound stuck on KISS-TNC channels"
+  body: |
+    If your station was set up with a KISS-TNC channel, for example
+    direwolf running on a separate machine, outbound APRS messages
+    would sit on the Messages tab showing the clock icon and never
+    transmit. They now go out as expected. Nothing to reconfigure.
+
 - version: "0.13.1"
   date: "2026-05-05"
   style: info
