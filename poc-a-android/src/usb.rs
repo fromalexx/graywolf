@@ -99,12 +99,18 @@ fn find_all_feature_units(desc: &[u8]) -> Vec<FuInfo> {
     out
 }
 
-/// Best-effort: list USB devices, locate the USB-Audio class device,
-/// request permission, open it, walk the config descriptor for a
-/// volume-capable Feature Unit, and SET_CUR the master volume to
-/// `target_db`. Logs progress and returns Ok unless we hit something
-/// that blocks the entire flow.
-pub fn enumerate_and_set_volume(app: &AndroidApp, target_db: f32) -> Result<(), String> {
+/// Diagnostic-only: list USB devices and their class topology so the
+/// run report can document what graywolf-modem sees on this tablet.
+/// We do not attempt FU_VOLUME control here — once the audio HAL claims
+/// the USB-Audio device for AudioRecord, control transfers from
+/// user-space are refused (rc=-1 on every SET_CUR attempt).
+pub fn enumerate_only(app: &AndroidApp) -> Result<(), String> {
+    enumerate_and_set_volume(app, 0.0)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn enumerate_and_set_volume(app: &AndroidApp, target_db: f32) -> Result<(), String> {
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
     let activity_ptr = app.activity_as_ptr() as jni::sys::jobject;
     if vm_ptr.is_null() || activity_ptr.is_null() {
