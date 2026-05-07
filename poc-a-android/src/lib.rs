@@ -49,7 +49,11 @@ fn android_main(app: AndroidApp) {
         graywolf_demod::full_version()
     );
 
-    if let Err(e) = usb::enumerate_and_set_volume(&app, -35.0) {
+    // Conservative starting target: 0 dB nominal pin so the device path
+    // is restored from prior debug-run residue. Once we confirm audio
+    // returns, the target dB knob can be lowered for the actual
+    // calibration sweep.
+    if let Err(e) = usb::enumerate_and_set_volume(&app, 0.0) {
         warn!("USB capture-gain setup failed: {}", e);
     }
 

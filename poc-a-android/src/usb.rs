@@ -475,51 +475,35 @@ pub fn enumerate_and_set_volume(app: &AndroidApp, target_db: f32) -> Result<(), 
     // the AC interface detaches the snd-usb-audio kernel driver that
     // AAudio depends on.
 
-    let mut total_db: f32 = 0.0;
+    // Heuristic: pick the FU whose bma_master has the AGC bit (0x40)
+    // set — on CM108-class codecs that's the microphone capture FU
+    // (source feeding the ADC), which is the right place to attenuate
+    // to keep the demod's audio out of clipping. The other Volume-
+    // capable FU is typically the sidetone/monitor path which has no
+    // bearing on what the host receives over USB-Audio Streaming.
+    let mic_fu = fus
+        .iter()
+        .find(|fu| fu.bma_master & 0x40 != 0)
+        .or_else(|| fus.first());
+    let mic_fu = match mic_fu {
+        Some(f) => f,
+        None => {
+            warn!("no candidate Feature Unit; skipping volume set");
+            return Ok(());
+        }
+    };
+    info!(
+        "selected mic FU: bUnitID={} (bma_master=0x{:02x})",
+        mic_fu.unit_id, mic_fu.bma_master
+    );
+
+    // Restore the other FUs to a neutral 0 dB so prior debug runs that
+    // pushed them out of band don't leave the device in a silent state.
     for fu in &fus {
-        // Read FU's MIN to know how far we can attenuate.
-        let probe_w_value: i32 = (VOLUME_CONTROL << 8) | 0x00;
-        let probe_w_index: i32 = ((fu.unit_id as i32) << 8) | (fu.ac_iface as i32);
-        let arr_min = JByteArray::from(env.new_byte_array(2).unwrap());
-        let _ = env
-            .call_method(
-                &connection,
-                "controlTransfer",
-                "(IIII[BII)I",
-                &[
-                    JValue::Int(UAC_CONTROL_IN),
-                    JValue::Int(UAC_GET_MIN),
-                    JValue::Int(probe_w_value),
-                    JValue::Int(probe_w_index),
-                    (&arr_min).into(),
-                    JValue::Int(2),
-                    JValue::Int(2000),
-                ],
-            )
-            .and_then(|v| v.i());
-        let min_bytes = env
-            .convert_byte_array(&arr_min)
-            .map(|v| v.into_iter().take(2).collect::<Vec<u8>>())
-            .unwrap_or_default();
-        if min_bytes.len() != 2 {
+        if fu.unit_id == mic_fu.unit_id {
             continue;
         }
-        let min_val = i16::from_le_bytes([min_bytes[0], min_bytes[1]]) as f32 / 256.0;
-        // Apply this FU's MIN, but cap our cumulative attenuation at the
-        // operator's target so we don't go silent on devices with very
-        // wide negative ranges.
-        let remaining_budget = target_db - total_db;
-        if remaining_budget >= 0.0 {
-            // Already at or above target attenuation; leave remaining FUs
-            // at default (skip).
-            info!(
-                "FU {} skipped: cumulative attenuation {:.1} dB already meets target",
-                fu.unit_id, total_db
-            );
-            continue;
-        }
-        let attenuation = min_val.max(remaining_budget);
-        let q8_8 = (attenuation * 256.0) as i16;
+        let q8_8: i16 = 0;
         let payload: Vec<u8> = vec![(q8_8 & 0xff) as u8, ((q8_8 >> 8) & 0xff) as u8];
         let payload_jarr = match env.byte_array_from_slice(&payload) {
             Ok(a) => JByteArray::from(a),
@@ -527,7 +511,7 @@ pub fn enumerate_and_set_volume(app: &AndroidApp, target_db: f32) -> Result<(), 
         };
         let w_value: i32 = (VOLUME_CONTROL << 8) | 0x00;
         let w_index: i32 = ((fu.unit_id as i32) << 8) | (fu.ac_iface as i32);
-        let rc = env
+        let _ = env
             .call_method(
                 &connection,
                 "controlTransfer",
@@ -542,25 +526,69 @@ pub fn enumerate_and_set_volume(app: &AndroidApp, target_db: f32) -> Result<(), 
                     JValue::Int(2000),
                 ],
             )
-            .and_then(|v| v.i())
-            .unwrap_or(-1);
-        if rc == 2 {
-            total_db += attenuation;
-            info!(
-                "FU {} SET_CUR {:.1} dB OK (cumulative {:.1} dB)",
-                fu.unit_id, attenuation, total_db
-            );
-        } else {
-            warn!(
-                "FU {} SET_CUR {:.1} dB failed rc={}",
-                fu.unit_id, attenuation, rc
-            );
-        }
+            .and_then(|v| v.i());
+        info!("FU {} reset to 0 dB (non-mic FU)", fu.unit_id);
     }
+
+    // Clamp target into mic FU's range. Apply.
+    let probe_w_value: i32 = (VOLUME_CONTROL << 8) | 0x00;
+    let probe_w_index: i32 = ((mic_fu.unit_id as i32) << 8) | (mic_fu.ac_iface as i32);
+    let arr_min = JByteArray::from(env.new_byte_array(2).unwrap());
+    let _ = env
+        .call_method(
+            &connection,
+            "controlTransfer",
+            "(IIII[BII)I",
+            &[
+                JValue::Int(UAC_CONTROL_IN),
+                JValue::Int(UAC_GET_MIN),
+                JValue::Int(probe_w_value),
+                JValue::Int(probe_w_index),
+                (&arr_min).into(),
+                JValue::Int(2),
+                JValue::Int(2000),
+            ],
+        )
+        .and_then(|v| v.i());
+    let min_val = env
+        .convert_byte_array(&arr_min)
+        .map(|v| {
+            if v.len() >= 2 {
+                i16::from_le_bytes([v[0], v[1]]) as f32 / 256.0
+            } else {
+                target_db
+            }
+        })
+        .unwrap_or(target_db);
+    let applied_db = target_db.max(min_val);
+    let q8_8 = (applied_db * 256.0) as i16;
+    let payload: Vec<u8> = vec![(q8_8 & 0xff) as u8, ((q8_8 >> 8) & 0xff) as u8];
+    let payload_jarr = match env.byte_array_from_slice(&payload) {
+        Ok(a) => JByteArray::from(a),
+        Err(_) => return Ok(()),
+    };
+    let w_value: i32 = (VOLUME_CONTROL << 8) | 0x00;
+    let w_index: i32 = ((mic_fu.unit_id as i32) << 8) | (mic_fu.ac_iface as i32);
+    let rc = env
+        .call_method(
+            &connection,
+            "controlTransfer",
+            "(IIII[BII)I",
+            &[
+                JValue::Int(UAC_CONTROL_OUT),
+                JValue::Int(UAC_SET_CUR),
+                JValue::Int(w_value),
+                JValue::Int(w_index),
+                (&payload_jarr).into(),
+                JValue::Int(2),
+                JValue::Int(2000),
+            ],
+        )
+        .and_then(|v| v.i())
+        .unwrap_or(-1);
     info!(
-        "USB capture-gain configured: total {:.1} dB across {} FU(s)",
-        total_db,
-        fus.len()
+        "FU {} SET_CUR {:.1} dB rc={} (target {:.1}, min {:.1})",
+        mic_fu.unit_id, applied_db, rc, target_db, min_val
     );
 
     let _ = env.call_method(&connection, "close", "()V", &[]);
