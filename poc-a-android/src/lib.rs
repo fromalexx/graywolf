@@ -155,33 +155,46 @@ fn run_demod(stop: Arc<AtomicBool>) -> Result<(), String> {
     let mut frames_seen: u64 = 0;
     let mut samples_total: u64 = 0;
     let mut peak_abs: i32 = 0;
+    let mut sumsq: u64 = 0;
+    let mut window_samples: u64 = 0;
+    let mut clipped: u64 = 0;
+    let clip_threshold = (i16::MAX as f32 * 0.9) as i32;
     let mut last_heartbeat = std::time::Instant::now();
     let heartbeat_period = Duration::from_secs(10);
     while !stop.load(Ordering::Relaxed) {
         if last_heartbeat.elapsed() >= heartbeat_period {
-            // Peak amplitude as % of i16 full-scale tells us if real audio
-            // is reaching the DSP. <2% = silence (likely opened wrong device
-            // or cable disconnected). 30-60% = healthy APRS RX level. >85%
-            // = clipping; demod will fail on edges.
             let peak_pct = peak_abs as f32 * 100.0 / i16::MAX as f32;
+            let rms = if window_samples > 0 {
+                ((sumsq as f64 / window_samples as f64).sqrt()) as f32
+            } else { 0.0 };
+            let rms_pct = rms * 100.0 / i16::MAX as f32;
+            let clip_pct = if window_samples > 0 {
+                clipped as f32 * 100.0 / window_samples as f32
+            } else { 0.0 };
+            // Healthy APRS: rms ~5-20%, peak 30-70%, clip <0.1%.
+            // rms 50%+ or clip >5% means turn level down.
+            // rms <1% means turn level up.
             info!(
-                "heartbeat: chunks={} frames={} samples={} peak={:.1}% elapsed={}s",
-                chunks_seen,
-                frames_seen,
-                samples_total,
-                peak_pct,
+                "heartbeat: chunks={} frames={} peak={:.1}% rms={:.1}% clip={:.2}% elapsed={}s",
+                chunks_seen, frames_seen, peak_pct, rms_pct, clip_pct,
                 last_heartbeat.elapsed().as_secs()
             );
             last_heartbeat = std::time::Instant::now();
             peak_abs = 0;
+            sumsq = 0;
+            window_samples = 0;
+            clipped = 0;
         }
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(chunk) => {
                 chunks_seen += 1;
                 samples_total += chunk.len() as u64;
+                window_samples += chunk.len() as u64;
                 for &s in &chunk {
                     let a = (s as i32).abs();
                     if a > peak_abs { peak_abs = a; }
+                    sumsq += (s as i64 * s as i64) as u64;
+                    if a >= clip_threshold { clipped += 1; }
                 }
                 for frame in feed_chunk(&mut demod, &chunk) {
                     let stamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
