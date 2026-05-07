@@ -90,6 +90,8 @@ fn run_demod(stop: Arc<AtomicBool>) -> Result<(), String> {
     );
 
     let tx_cb = tx.clone();
+    let cb_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let cb_count_cb = cb_count.clone();
     let stream = AudioStreamBuilder::new()
         .map_err(|e| format!("AudioStreamBuilder::new: {:?}", e))?
         .direction(AudioDirection::Input)
@@ -105,14 +107,25 @@ fn run_demod(stop: Arc<AtomicBool>) -> Result<(), String> {
                     return AudioCallbackResult::Continue;
                 }
                 let raw = unsafe { std::slice::from_raw_parts(data as *const i16, n) };
+                let cnt = cb_count_cb.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if cnt < 5 {
+                    let mut raw_min = i16::MAX;
+                    let mut raw_max = i16::MIN;
+                    for &s in raw {
+                        if s < raw_min { raw_min = s; }
+                        if s > raw_max { raw_max = s; }
+                    }
+                    let head: Vec<i16> = raw.iter().take(8).copied().collect();
+                    info!(
+                        "RAW cb#{} n={} min={} max={} head={:?}",
+                        cnt, n, raw_min, raw_max, head
+                    );
+                }
                 let mut out: Vec<i16> = Vec::with_capacity(n);
                 for &s in raw {
                     let scaled = (s as i32 * gain_q15) >> 15;
                     out.push(scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16);
                 }
-                // Non-blocking send; the demod loop drains on its own thread.
-                // Dropping a chunk here is preferable to stalling AAudio's
-                // realtime thread.
                 let _ = tx_cb.try_send(out);
                 AudioCallbackResult::Continue
             },
