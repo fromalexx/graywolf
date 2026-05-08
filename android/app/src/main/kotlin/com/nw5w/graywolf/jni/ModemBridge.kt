@@ -14,4 +14,5 @@ object ModemBridge {
     external fun modemPushSamples(buf: ShortArray, len: Int)
     external fun modemSetGainDb(db: Float)
     external fun modemStop()
+    external fun modemBuildTestFrame(): ShortArray
 }

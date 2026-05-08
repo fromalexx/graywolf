@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jfloat, jint, jlong, jshortArray, jstring, JNI_FALSE, JNI_TRUE, JNI_VERSION_1_6};
+use jni::sys::{jboolean, jfloat, jint, jlong, jshortArray, jsize, jstring, JNI_FALSE, JNI_TRUE, JNI_VERSION_1_6};
 use jni::{JNIEnv, JavaVM};
 use log::{error, info, warn};
 
@@ -206,6 +206,35 @@ pub extern "system" fn Java_com_nw5w_graywolf_jni_ModemBridge_modemStop<'local>(
         let _ = j.join();
     }
     info!("modem stopped");
+}
+
+/// Build the canned POC-C TX test frame and return it as a Java short[]
+/// (PCM16 mono at 22050 Hz). Synchronous; allocates the array each call.
+/// No state — safe to call before or without modemStart().
+#[no_mangle]
+pub extern "system" fn Java_com_nw5w_graywolf_jni_ModemBridge_modemBuildTestFrame<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jshortArray {
+    let samples = crate::tx::canned::build_canned_test_frame_pcm();
+    let arr = match env.new_short_array(samples.len() as jsize) {
+        Ok(a) => a,
+        Err(e) => {
+            error!("new_short_array failed: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+    if let Err(e) = env.set_short_array_region(&arr, 0, &samples) {
+        error!("set_short_array_region failed: {}", e);
+        return std::ptr::null_mut();
+    }
+    info!(
+        "modemBuildTestFrame: emitted {} samples ({} ms @ {} Hz)",
+        samples.len(),
+        samples.len() as u64 * 1000 / crate::tx::canned::SAMPLE_RATE_HZ as u64,
+        crate::tx::canned::SAMPLE_RATE_HZ,
+    );
+    arr.into_raw()
 }
 
 fn run_demod(
