@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	pb "github.com/chrissnell/graywolf/pkg/ipcproto"
@@ -23,6 +24,11 @@ import (
 
 //go:embed pocb_index.html
 var indexHTML []byte
+
+var (
+	currentGainMu sync.Mutex
+	currentGainDB float64 = -6.0
+)
 
 func main() {
 	socket := mustEnv("GRAYWOLF_MODEM_SOCKET")
@@ -59,24 +65,28 @@ func main() {
 		_ = json.NewEncoder(w).Encode(ring.snapshot())
 	})))
 	mux.Handle("/api/_internal/gain", bearerAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST only", http.StatusMethodNotAllowed)
-			return
+		switch r.Method {
+		case http.MethodPost:
+			var body struct {
+				DB float64 `json:"db"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			currentGainMu.Lock()
+			currentGainDB = body.DB
+			currentGainMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			currentGainMu.Lock()
+			v := currentGainDB
+			currentGainMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]float64{"db": v})
+		default:
+			http.Error(w, "GET or POST", http.StatusMethodNotAllowed)
 		}
-		var body struct {
-			DB float64 `json:"db"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "bad json", http.StatusBadRequest)
-			return
-		}
-		// POC-B forwards to Rust via the existing ConfigureAudio / SetDeviceGain
-		// IPC paths in phase 3. For now we wire the slider into Rust via the
-		// JNI modemSetGainDb call in Kotlin (Task 15) -- this Go endpoint is
-		// kept so the WebView contract is stable, but Kotlin owns the actual
-		// gain push. The endpoint just records the latest value.
-		_ = body.DB // observed by Kotlin via WebAppInterface (Task 15)
-		w.WriteHeader(http.StatusNoContent)
 	})))
 
 	listener, err := net.Listen("tcp", listen)

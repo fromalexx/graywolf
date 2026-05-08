@@ -13,10 +13,12 @@ import com.nw5w.graywolf.audio.AudioPump
 import com.nw5w.graywolf.binaries.GoLauncher
 import com.nw5w.graywolf.jni.ModemBridge
 import java.io.File
+import kotlin.concurrent.thread
 
 class GraywolfService : Service() {
     private val audioPump = AudioPump()
     private var goLauncher: GoLauncher? = null
+    private var gainPoller: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -87,6 +89,27 @@ class GraywolfService : Service() {
         goLauncher = launcher
         goListenerReady = true
         Log.i(TAG, "poc-b: go_child_up")
+
+        gainPoller = thread(start = true, isDaemon = true, name = "gain-poll") {
+            val token = bearerToken
+            var last = Float.NaN
+            val rx = Regex("""\"db\":(-?\d+(?:\.\d+)?)""")
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    val u = java.net.URL("http://127.0.0.1:8080/api/_internal/gain")
+                    val c = u.openConnection() as java.net.HttpURLConnection
+                    c.setRequestProperty("Authorization", "Bearer $token")
+                    val body = c.inputStream.bufferedReader().readText()
+                    val db = rx.find(body)?.groupValues?.get(1)?.toFloatOrNull()
+                    if (db != null && db != last) {
+                        ModemBridge.modemSetGainDb(db)
+                        Log.i(TAG, "poc-b: gain_applied db=$db")
+                        last = db
+                    }
+                } catch (_: Throwable) { /* swallow */ }
+                Thread.sleep(1000)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -94,6 +117,8 @@ class GraywolfService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        gainPoller?.interrupt()
+        gainPoller = null
         goListenerReady = false
         goLauncher?.stop()
         audioPump.stop()
