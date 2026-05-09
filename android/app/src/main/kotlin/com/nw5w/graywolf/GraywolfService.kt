@@ -50,7 +50,12 @@ class GraywolfService : Service() {
             executablePath = goPath,
             env = mapOf(
                 "GRAYWOLF_MODEM_SOCKET" to socketPath(),
-                "GRAYWOLF_PLATFORM_SOCKET" to platformSocketPath(),
+                // android.net.LocalServerSocket(String) binds in the Linux
+                // abstract namespace (no filesystem entry, name prefixed
+                // with NUL). Go's net package dials abstract sockets via a
+                // leading "@". We expose the abstract-form address to the
+                // Go child so both sides agree.
+                "GRAYWOLF_PLATFORM_SOCKET" to "@" + platformSocketPath(),
                 "GRAYWOLF_LISTEN" to "127.0.0.1:8080",
                 "GRAYWOLF_LISTEN_TOKEN" to bearerToken,
             ),
