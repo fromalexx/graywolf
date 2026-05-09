@@ -1149,13 +1149,21 @@ func (a *App) wireHTTP(ctx context.Context) error {
 	// The checker's Run goroutine is launched by updatesCheckComponent;
 	// the reload channel it selects on is owned by apiSrv and surfaced
 	// via UpdatesReloadCh(). See pkg/updatescheck and plan D4.
-	a.updatesChecker = updatescheck.NewChecker(
-		a.cfg.Version,
-		a.store,
-		updatescheck.DefaultBaseURL,
-		a.logger.With("component", "updatescheck"),
-	)
-	apiSrv.SetUpdatesChecker(a.updatesChecker)
+	//
+	// Skipped on Android: Play Store handles upgrades there; an
+	// in-process GitHub poll has no purpose and would generate
+	// unwanted background traffic.
+	if a.cfg.Platform != "android" {
+		a.updatesChecker = updatescheck.NewChecker(
+			a.cfg.Version,
+			a.store,
+			updatescheck.DefaultBaseURL,
+			a.logger.With("component", "updatescheck"),
+		)
+		apiSrv.SetUpdatesChecker(a.updatesChecker)
+	} else {
+		a.logger.Info("updatescheck: disabled on android (Play Store handles updates)")
+	}
 
 	// /api/version is public (the UI reads it before login to pick
 	// which screens to show). It is mounted on the outer mux so it
@@ -1488,6 +1496,9 @@ func (a *App) updatesCheckComponent() namedComponent {
 	return namedComponent{
 		name: "updates check",
 		start: func(ctx context.Context) error {
+			if a.updatesChecker == nil {
+				return nil
+			}
 			a.updatesWG.Add(1)
 			go func() {
 				defer a.updatesWG.Done()
@@ -1500,6 +1511,9 @@ func (a *App) updatesCheckComponent() namedComponent {
 			return nil
 		},
 		stop: func(shutdownCtx context.Context) error {
+			if a.updatesChecker == nil {
+				return nil
+			}
 			return waitGroup(shutdownCtx, &a.updatesWG, "updates check")
 		},
 	}
