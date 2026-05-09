@@ -1,0 +1,7 @@
+  AudioStreamIn: 0xb400006eb7dea0a0 flags 0 (AUDIO_INPUT_FLAG_NONE)
+  Frames read: 4458240
+  Hal stream dump:
+--
+-   AudioStreamIn: 0xb400006eb7de4f10 flags 0 (AUDIO_INPUT_FLAG_NONE)
+-   Frames read: 11939200
+-   No active record clients

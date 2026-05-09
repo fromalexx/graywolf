@@ -1,0 +1,30 @@
+--------- beginning of main
+05-08 23:19:25.040 14621 14621 I UsbPttAdapter: init complete
+05-08 23:19:25.417 14621 14621 I UsbPttAdapter: enumerate: 1 attached USB device(s)
+05-08 23:19:25.419 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/049 vid=0x1209 pid=0x7388 role=AIOC ifaces=9
+05-08 23:19:25.419 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=1 subclass=1 proto=32 endpoints=0
+05-08 23:19:25.419 14621 14621 I UsbPttAdapter:   iface[1] id=1 class=1 subclass=2 proto=32 endpoints=0
+05-08 23:19:25.420 14621 14621 I UsbPttAdapter:   iface[2] id=1 class=1 subclass=2 proto=32 endpoints=2 ep[0] addr=0x02 type=1 dir=0 ep[1] addr=0x82 type=1 dir=128
+05-08 23:19:25.420 14621 14621 I UsbPttAdapter:   iface[3] id=2 class=1 subclass=2 proto=32 endpoints=0
+05-08 23:19:25.420 14621 14621 I UsbPttAdapter:   iface[4] id=2 class=1 subclass=2 proto=32 endpoints=1 ep[0] addr=0x81 type=1 dir=128
+05-08 23:19:25.421 14621 14621 I UsbPttAdapter:   iface[5] id=3 class=3 subclass=0 proto=0 endpoints=1 ep[0] addr=0x83 type=3 dir=128
+05-08 23:19:25.421 14621 14621 I UsbPttAdapter:   iface[6] id=4 class=2 subclass=2 proto=0 endpoints=1 ep[0] addr=0x85 type=3 dir=128
+05-08 23:19:25.422 14621 14621 I UsbPttAdapter:   iface[7] id=5 class=10 subclass=0 proto=0 endpoints=2 ep[0] addr=0x04 type=2 dir=0 ep[1] addr=0x84 type=2 dir=128
+05-08 23:19:25.422 14621 14621 I UsbPttAdapter:   iface[8] id=6 class=254 subclass=1 proto=1 endpoints=0
+05-08 23:19:25.423 14621 14621 I UsbPttAdapter: tryOpen /dev/bus/usb/001/049 role=AIOC
+05-08 23:19:25.424 14621 14692 I UsbPttAdapter: openAioc: step=ctor
+05-08 23:19:25.432 14621 14692 I UsbPttAdapter: openAioc: step=openDevice
+05-08 23:19:25.502 14621 14692 I UsbPttAdapter: openAioc: step=ports count=1
+05-08 23:19:25.508 14621 14692 I UsbPttAdapter: openAioc: step=port.open
+05-08 23:19:25.516 14621 14692 I UsbPttAdapter: openAioc: step=setParameters
+05-08 23:19:25.516 14621 14692 I UsbPttAdapter: openAioc: step=dtr=rts=false
+05-08 23:19:25.516 14621 14692 I UsbPttAdapter: AIOC opened /dev/bus/usb/001/049
+05-08 23:20:32.897 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=true rts=0
+05-08 23:20:38.538 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=false rts=0
+05-08 23:20:39.730 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=false rts=0
+05-08 23:20:43.386 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=true rts=0
+05-08 23:20:51.827 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=false rts=0
+05-08 23:20:56.452 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=true rts=0
+05-08 23:20:57.387 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=false rts=0
+05-08 23:20:58.815 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=true rts=0
+05-08 23:20:59.702 14621 14738 I UsbPttAdapter: ptt: aioc_cdc dtr=false rts=0

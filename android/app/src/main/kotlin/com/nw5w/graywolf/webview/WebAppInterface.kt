@@ -4,6 +4,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import com.nw5w.graywolf.audio.AudioTxTest
 import com.nw5w.graywolf.jni.ModemBridge
+import com.nw5w.graywolf.usb.UsbPttAdapter
 import kotlin.concurrent.thread
 
 class WebAppInterface(
@@ -30,6 +31,31 @@ class WebAppInterface(
             }
         }
     }
+
+    /** POC-D: returns the USB PTT adapter status snapshot as a JSON string. */
+    @JavascriptInterface
+    fun pttStatusJson(): String = UsbPttAdapter.status().toString()
+
+    @JavascriptInterface
+    fun keyCp2102nRts(): Boolean = UsbPttAdapter.keyCp2102nRts()
+
+    @JavascriptInterface
+    fun unkeyCp2102nRts(): Boolean = UsbPttAdapter.unkeyCp2102nRts()
+
+    @JavascriptInterface
+    fun keyCm108Hid(): Boolean = UsbPttAdapter.keyCm108Hid()
+
+    @JavascriptInterface
+    fun unkeyCm108Hid(): Boolean = UsbPttAdapter.unkeyCm108Hid()
+
+    @JavascriptInterface
+    fun setCm108Bit(bit: Int): Boolean = UsbPttAdapter.setCm108Bit(bit)
+
+    @JavascriptInterface
+    fun keyAiocCdcRts(): Boolean = UsbPttAdapter.keyAiocCdcRts()
+
+    @JavascriptInterface
+    fun unkeyAiocCdcRts(): Boolean = UsbPttAdapter.unkeyAiocCdcRts()
 
     companion object { private const val TAG = "WebAppInterface" }
 }

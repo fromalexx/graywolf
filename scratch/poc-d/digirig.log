@@ -1,0 +1,102 @@
+--------- beginning of main
+05-08 23:31:56.950 14621 14621 I UsbPttAdapter: enumerate: 2 attached USB device(s)
+05-08 23:31:56.951 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/053 vid=0x0D8C pid=0x0012 role=CM108 ifaces=6
+05-08 23:31:56.951 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=1 subclass=1 proto=0 endpoints=0
+05-08 23:31:56.952 14621 14621 I UsbPttAdapter:   iface[1] id=1 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:31:56.953 14621 14621 I UsbPttAdapter:   iface[2] id=1 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x01 type=1 dir=0
+05-08 23:31:56.953 14621 14621 I UsbPttAdapter:   iface[3] id=2 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:31:56.954 14621 14621 I UsbPttAdapter:   iface[4] id=2 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x82 type=1 dir=128
+05-08 23:31:56.955 14621 14621 I UsbPttAdapter:   iface[5] id=3 class=3 subclass=0 proto=0 endpoints=1 ep[0] addr=0x87 type=3 dir=128
+05-08 23:31:56.960 14621 14621 I UsbPttAdapter: requestPermission /dev/bus/usb/001/053
+05-08 23:31:56.978 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/052 vid=0x10C4 pid=0xEA60 role=CP2102N ifaces=1
+05-08 23:31:56.979 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=255 subclass=0 proto=0 endpoints=2 ep[0] addr=0x02 type=2 dir=0 ep[1] addr=0x82 type=2 dir=128
+05-08 23:31:56.981 14621 14621 I UsbPttAdapter: requestPermission /dev/bus/usb/001/052
+05-08 23:31:58.915 14621 14621 I UsbPttAdapter: permission result device=/dev/bus/usb/001/053 granted=true
+05-08 23:31:58.915 14621 14621 I UsbPttAdapter: tryOpen /dev/bus/usb/001/053 role=CM108
+05-08 23:31:58.922 14621 14929 I UsbPttAdapter: CM108 opened /dev/bus/usb/001/053 hid_iface=3 vid=0x0D8C pid=0x0012
+05-08 23:31:58.927 14621 14621 I UsbPttAdapter: enumerate: 2 attached USB device(s)
+05-08 23:31:58.927 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/053 vid=0x0D8C pid=0x0012 role=CM108 ifaces=6
+05-08 23:31:58.927 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=1 subclass=1 proto=0 endpoints=0
+05-08 23:31:58.927 14621 14621 I UsbPttAdapter:   iface[1] id=1 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:31:58.928 14621 14621 I UsbPttAdapter:   iface[2] id=1 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x01 type=1 dir=0
+05-08 23:31:58.928 14621 14621 I UsbPttAdapter:   iface[3] id=2 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:31:58.928 14621 14621 I UsbPttAdapter:   iface[4] id=2 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x82 type=1 dir=128
+05-08 23:31:58.929 14621 14621 I UsbPttAdapter:   iface[5] id=3 class=3 subclass=0 proto=0 endpoints=1 ep[0] addr=0x87 type=3 dir=128
+05-08 23:31:58.929 14621 14621 I UsbPttAdapter: enumerate: CM108 already open, skipping
+05-08 23:31:58.929 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/052 vid=0x10C4 pid=0xEA60 role=CP2102N ifaces=1
+05-08 23:31:58.930 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=255 subclass=0 proto=0 endpoints=2 ep[0] addr=0x02 type=2 dir=0 ep[1] addr=0x82 type=2 dir=128
+05-08 23:31:58.931 14621 14621 I UsbPttAdapter: requestPermission /dev/bus/usb/001/052
+05-08 23:32:00.537 14621 14621 I UsbPttAdapter: permission result device=/dev/bus/usb/001/052 granted=true
+05-08 23:32:00.537 14621 14621 I UsbPttAdapter: tryOpen /dev/bus/usb/001/052 role=CP2102N
+05-08 23:32:00.537 14621 14932 I UsbPttAdapter: openCp2102n: step=ctor
+05-08 23:32:00.539 14621 14932 I UsbPttAdapter: openCp2102n: step=openDevice
+05-08 23:32:00.540 14621 14932 I UsbPttAdapter: openCp2102n: step=ports
+05-08 23:32:00.540 14621 14932 I UsbPttAdapter: openCp2102n: step=port.open
+05-08 23:32:00.543 14621 14932 I UsbPttAdapter: openCp2102n: step=setParameters
+05-08 23:32:00.543 14621 14932 I UsbPttAdapter: openCp2102n: step=rts=false
+05-08 23:32:00.544 14621 14932 I UsbPttAdapter: CP2102N opened /dev/bus/usb/001/052
+05-08 23:32:00.548 14621 14621 I UsbPttAdapter: enumerate: 2 attached USB device(s)
+05-08 23:32:00.549 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/053 vid=0x0D8C pid=0x0012 role=CM108 ifaces=6
+05-08 23:32:00.549 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=1 subclass=1 proto=0 endpoints=0
+05-08 23:32:00.549 14621 14621 I UsbPttAdapter:   iface[1] id=1 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:32:00.549 14621 14621 I UsbPttAdapter:   iface[2] id=1 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x01 type=1 dir=0
+05-08 23:32:00.549 14621 14621 I UsbPttAdapter:   iface[3] id=2 class=1 subclass=2 proto=0 endpoints=0
+05-08 23:32:00.550 14621 14621 I UsbPttAdapter:   iface[4] id=2 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x82 type=1 dir=128
+05-08 23:32:00.550 14621 14621 I UsbPttAdapter:   iface[5] id=3 class=3 subclass=0 proto=0 endpoints=1 ep[0] addr=0x87 type=3 dir=128
+05-08 23:32:00.550 14621 14621 I UsbPttAdapter: enumerate: CM108 already open, skipping
+05-08 23:32:00.551 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/052 vid=0x10C4 pid=0xEA60 role=CP2102N ifaces=1
+05-08 23:32:00.551 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=255 subclass=0 proto=0 endpoints=2 ep[0] addr=0x02 type=2 dir=0 ep[1] addr=0x82 type=2 dir=128
+05-08 23:32:00.551 14621 14621 I UsbPttAdapter: enumerate: CP2102N already open, skipping
+05-08 23:32:08.780 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x04 state=true rc=4
+05-08 23:32:11.800 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:12.686 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x04 state=true rc=4
+05-08 23:32:13.307 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:13.774 14621 14738 E UsbPttAdapter: setAiocRts(true) failed: java.io.IOException: controlTransfer failed
+05-08 23:32:14.764 14621 14738 E UsbPttAdapter: setAiocRts(true) failed: java.io.IOException: controlTransfer failed
+05-08 23:32:15.350 14621 14738 E UsbPttAdapter: setAiocRts(false) failed: java.io.IOException: controlTransfer failed
+05-08 23:32:16.158 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:16.681 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:17.052 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:17.365 14621 14738 E UsbPttAdapter: setAiocRts(false) failed: java.io.IOException: controlTransfer failed
+05-08 23:32:17.651 14621 14738 E UsbPttAdapter: setAiocRts(false) failed: java.io.IOException: controlTransfer failed
+05-08 23:32:21.032 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:32:22.458 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-08 23:32:38.114 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x04 state=true rc=4
+05-08 23:32:39.980 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:40.320 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-08 23:32:41.207 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:32:42.089 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-08 23:32:42.311 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-08 23:33:16.336 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:33:16.878 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:33:17.979 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:33:19.900 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-08 23:33:21.545 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-08 23:33:26.672 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-08 23:33:27.027 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-09 00:13:04.670 14621 14621 I UsbPttAdapter: enumerate: 2 attached USB device(s)
+05-09 00:13:04.671 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/053 vid=0x0D8C pid=0x0012 role=CM108 ifaces=6
+05-09 00:13:04.672 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=1 subclass=1 proto=0 endpoints=0
+05-09 00:13:04.672 14621 14621 I UsbPttAdapter:   iface[1] id=1 class=1 subclass=2 proto=0 endpoints=0
+05-09 00:13:04.673 14621 14621 I UsbPttAdapter:   iface[2] id=1 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x01 type=1 dir=0
+05-09 00:13:04.673 14621 14621 I UsbPttAdapter:   iface[3] id=2 class=1 subclass=2 proto=0 endpoints=0
+05-09 00:13:04.674 14621 14621 I UsbPttAdapter:   iface[4] id=2 class=1 subclass=2 proto=0 endpoints=1 ep[0] addr=0x82 type=1 dir=128
+05-09 00:13:04.675 14621 14621 I UsbPttAdapter:   iface[5] id=3 class=3 subclass=0 proto=0 endpoints=1 ep[0] addr=0x87 type=3 dir=128
+05-09 00:13:04.675 14621 14621 I UsbPttAdapter: enumerate: CM108 already open, skipping
+05-09 00:13:04.678 14621 14621 I UsbPttAdapter: device name=/dev/bus/usb/001/052 vid=0x10C4 pid=0xEA60 role=CP2102N ifaces=1
+05-09 00:13:04.681 14621 14621 I UsbPttAdapter:   iface[0] id=0 class=255 subclass=0 proto=0 endpoints=2 ep[0] addr=0x02 type=2 dir=0 ep[1] addr=0x82 type=2 dir=128
+05-09 00:13:04.681 14621 14621 I UsbPttAdapter: enumerate: CP2102N already open, skipping
+05-09 00:13:11.090 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-09 00:13:13.239 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:13.580 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:14.576 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-09 00:13:15.354 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:16.279 14621 14738 I UsbPttAdapter: ptt: cm108_set_report pin=3 mask=0x04 value=0x00 state=false rc=4
+05-09 00:13:16.816 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:17.427 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-09 00:13:18.079 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:19.648 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-09 00:13:21.037 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:21.624 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false
+05-09 00:13:22.330 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=true
+05-09 00:13:23.089 14621 14738 I UsbPttAdapter: ptt: cp2102n_rts=false

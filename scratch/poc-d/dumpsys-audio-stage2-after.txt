@@ -1,0 +1,3 @@
+  AudioStreamIn: 0xb400006eb7de6fe0 flags 0 (AUDIO_INPUT_FLAG_NONE)
+  Frames read: 105697280
+  Hal stream dump:
