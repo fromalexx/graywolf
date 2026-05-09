@@ -13,6 +13,19 @@
   added §11.1 battery baseline; added Doze and localhost-surface
   risks (#6, #7) to §12; added `AudioRouteChanged` proto message and
   `AudioDeviceCallback` registration to AudioAdapter.
+- 2026-05-09: revised after POC-D run report (PR #106). Corrected
+  §3.3 PTT relay rationale to reflect bench-validated transports:
+  Digirig is CP2102N RTS only (CM108 GPIO not externally wired);
+  AIOC is CDC-ACM DTR=1/RTS=0 only (HID surface present but
+  firmware-disabled on ≥1.2.0). N3 amended to list the four
+  transports. New invariant N11 (USB opens / claimInterface /
+  first control transfer must run on a worker thread, never on
+  the dispatcher — POC-D ANR fix). §4.4 Rust modem file table
+  splits the original `ptt_android_usb_hid.rs` into separate
+  `ptt_android_cdc_acm.rs` (AIOC) and `ptt_android_usb_hid.rs`
+  (generic CM108-class). §11 phase 5b scope clarified — Digirig
+  fully done in phase 5, phase 5b owns AIOC and other non-Digirig
+  hardware.
 - 2026-05-07: revised after POC-A run report (PR #87). Modem ships as
   a `cdylib` loaded into the Kotlin Service via JNI, **not** as an
   exec'd `lib*.so` ELF (cpal / native code requires `ndk_context`
@@ -185,21 +198,64 @@ API surface stays in Go REST.
 
 ### 3.3 PTT relay rationale
 
-Android does not expose a kernel CDC/FTDI/CP2102 driver. USB-serial
-control happens entirely in userspace via `usb-serial-for-android`,
-which requires a Java/Kotlin owner of the `UsbDeviceConnection`. CM108
-USB HID and Bluetooth SPP serial have the same constraint - the fd is
-held by Kotlin.
+Android does not expose a kernel CDC / FTDI / CP2102 / CDC-ACM
+driver. USB-serial and HID control happen entirely in userspace via
+`usb-serial-for-android`, which requires a Java/Kotlin owner of the
+`UsbDeviceConnection`. CM108 USB HID, CDC-ACM virtual serial, and
+Bluetooth SPP serial all have the same constraint — the fd is held
+by Kotlin.
 
-Therefore Rust drivers for these PTT methods do not touch hardware.
-They emit `KeyPttRequest` / `UnkeyPttRequest` proto messages on the
+The four bench-supported transports (POC-D 2026-05-09, PR #106):
+
+- **CP2102N RTS** — the **Digirig**'s sole external PTT path.
+  Vid `0x10C4`, pid `0xEA60`. Open via
+  `usb-serial-for-android`'s `Cp21xxSerialDriver`, retain
+  `UsbSerialPort`, toggle RTS to key/unkey.
+- **CDC-ACM DTR** — the **AIOC**'s sole PTT path on firmware
+  ≥1.2.0. Vid `0x1209`, pid `0x7388`. Open via
+  `CdcAcmSerialDriver`. Drive `DTR=1` to key, **hold `RTS=0`** in
+  both keyed and unkeyed states; setting RTS=1 alongside DTR=1
+  does **not** key.
+- **CM108 HID GPIO** — for any non-AIOC, non-Digirig CM108-class
+  device whose GPIO is actually wired to PTT externally. Send an
+  HID Set_Report with the 4-byte layout
+  `[OR0=0, OR1=value, OR2=mask, OR3=0]`, Report ID 0 in
+  `wValue=0x0200` (not in the buffer). GPIO pin numbering is
+  1-indexed; default PTT pin is GPIO 3 (mask `0x04`). Layout
+  authoritative source: `graywolf-modem/src/tx/ptt_cm108_unix.rs`.
+- **Bluetooth SPP serial** — Phase 5c. RFCOMM stream from a paired
+  classic-BT serial adapter; key/unkey via line-control bytes the
+  specific adapter implements.
+
+Hardware notes verified at the bench:
+
+- **Digirig has only one external PTT path: CP2102N RTS.** The
+  CM108 audio chip on the Digirig also enumerates as a USB HID
+  interface, but its GPIO pins are not wired through to the PTT
+  line — Set_Report writes to it accept and return `rc=4` without
+  driving any external signal. Don't surface CM108 HID PTT as a
+  Digirig option.
+- **AIOC's CM108-shape HID interface is non-functional for PTT**
+  on firmware ≥1.2.0 — the firmware exposes the surface for
+  software compatibility but does not wire it through. APRSdroid's
+  `UsbTnc.scala` confirms by opening AIOC as CDC-ACM and never
+  using HID Set_Report. Don't even probe HID for AIOC.
+- **CM108 GPIO 1-indexing**: datasheets and the in-tree desktop
+  driver use 1-indexed pin numbering (GPIO 3 = mask `0x04`). The
+  POC-D spec used 0-indexed bit numbering (bit 3 = mask `0x08`)
+  and was wrong. Phase-5 proto + UI use 1-indexed pin numbers
+  throughout; serializing as the mask byte directly avoids the
+  confusion.
+
+Rust drivers for these PTT methods do not touch hardware. They
+emit `KeyPttRequest` / `UnkeyPttRequest` proto messages on the
 existing Go<->Rust UDS, Go relays the message to Kotlin via
-platform-services UDS, Kotlin actually toggles the line. The path is
-microsecond-scale UDS hops; total budget under 5ms typical.
+platform-services UDS, Kotlin actually toggles the line. The path
+is microsecond-scale UDS hops; total budget under 5 ms typical.
 
-The TX ordering invariant is unchanged: PTT keyed before audio starts,
-unkeyed after audio drains. txgovernor (invariant 16) remains the
-single source of truth for the TX path.
+The TX ordering invariant is unchanged: PTT keyed before audio
+starts, unkeyed after audio drains. txgovernor (invariant 16)
+remains the single source of truth for the TX path.
 
 ### 3.4 Modem readiness signal (invariant 13)
 
@@ -247,7 +303,7 @@ and APK `versionName`/`VERSION`.
 | `jni/ModemBridge.kt` | thin Kotlin facade over the Rust JNI surface (`modemStart`, `modemAwaitReady`, `modemPushSamples`, `modemSetGainDb`, `modemVersion`, `modemStop`). Also routes Rust-side log lines to logcat. |
 | `platformsvc/PlatformServer.kt` | UDS listener, framing, dispatch to adapters |
 | `platformsvc/GpsAdapter.kt` | `LocationManager` listener -> `GpsFix` proto |
-| `platformsvc/UsbAdapter.kt` | `UsbManager` enumerator + `usb-serial-for-android` driver + CM108 HID write + `BluetoothSocket` RFCOMM. Owns retained device connections. |
+| `platformsvc/UsbAdapter.kt` | `UsbManager` enumerator + `usb-serial-for-android` (CP2102N + CDC-ACM drivers) + CM108 HID Set_Report writer + `BluetoothSocket` RFCOMM. Owns retained device connections. **All open / claimInterface / first-control-transfer paths must dispatch to a worker thread (N11), never run inline on a BroadcastReceiver or JS-bridge callback.** |
 | `platformsvc/AudioAdapter.kt` | `AudioManager.getDevices()` enumerator. Kotlin owns the actual `AudioRecord` pump (see `audio/AudioPump.kt`). Also registers `AudioDeviceCallback` and pushes `AudioRouteChanged` proto on add/remove (drives invariant N6). |
 | `platformsvc/BatteryAdapter.kt` | `BATTERY_CHANGED` broadcast -> `BatteryState` proto |
 | `webview/WebAppInterface.kt` | minimal JavascriptInterface: USB picker confirmation, runtime perm prompt, gain-slider state, bearer-token handoff |
@@ -307,9 +363,10 @@ target triple.
 | `src/lib.rs` | exposes a public `run_rx(samples: &[i16], gain_db: f32) -> Vec<DecodedFrame>` (or equivalent stream-style API) so both the desktop binary and the Android JNI layer call into the same DSP. |
 | `src/android/mod.rs` | `cfg(target_os="android")`-only module containing JNI entry points (`Java_…_modemStart`, `_modemAwaitReady`, `_modemPushSamples`, `_modemSetGainDb`, `_modemVersion`, `_modemStop`). Owns the in-process IPC server (UDS) and the demod ingest queue. |
 | `src/android/audio.rs` | consumer side of the Kotlin->Rust JNI sample hand-off. Wraps the JNI `ByteBuffer` into an `&[i16]` slice, applies the operator-set software gain (N9), enqueues to the demod input ring. |
-| `src/tx/ptt_android_usb_serial.rs` | thin driver: emits `KeyPttRequest` / `UnkeyPttRequest` over the existing Go<->Rust UDS, no hardware access. Compiles on Android only. |
-| `src/tx/ptt_android_usb_hid.rs` | same pattern |
-| `src/tx/ptt_android_bt_spp.rs` | same pattern |
+| `src/tx/ptt_android_usb_serial.rs` | thin driver for **Digirig CP2102N RTS** path: emits `KeyPttRequest` / `UnkeyPttRequest` over the existing Go<->Rust UDS, no hardware access. Compiles on Android only. |
+| `src/tx/ptt_android_cdc_acm.rs` | thin driver for **AIOC CDC-ACM DTR** path. Same proto-event pattern. The Kotlin side asserts DTR=1 and holds RTS=0 — encoded in the proto message, not in this driver. |
+| `src/tx/ptt_android_usb_hid.rs` | thin driver for **CM108 HID GPIO** path (non-AIOC, non-Digirig CM108-class hardware whose GPIO is externally wired to PTT). 1-indexed pin numbering; report layout per `ptt_cm108_unix.rs`. |
+| `src/tx/ptt_android_bt_spp.rs` | thin driver for **Bluetooth SPP serial** path. Same pattern. (Phase 5c.) |
 | `src/tx/mod.rs` | dispatches new method enum values |
 
 `build.rs` regenerates from the same `proto/graywolf.proto` (invariant
@@ -578,12 +635,17 @@ specifies the additions for the implementation plan to write.
   the Rust modem (in-process to the Service), and the Go child
   process all assume those identities at startup. Note: Rust modem
   ↔ Kotlin happens via JNI in-process, no socket — see N8.
-- **N3.** USB-class hardware (serial, HID, CM108, BT SPP) is owned by
-  Kotlin on Android. Rust modem PTT drivers for these methods do not
-  touch hardware - they emit proto events only. Any new Android PTT
-  method follows this split. *Why:* Android does not expose
-  `/dev/ttyUSB*` or HID-write paths to userspace; only Kotlin can hold
-  the `UsbDeviceConnection`.
+- **N3.** USB-class hardware (USB-serial CP21xx/FTDI/CH34x, CDC-ACM,
+  CM108-class HID, BT SPP) is owned by Kotlin on Android. Rust modem
+  PTT drivers for these methods do not touch hardware — they emit
+  proto events only. Any new Android PTT method follows this split.
+  *Why:* Android does not expose `/dev/ttyUSB*`, `/dev/ttyACM*`, or
+  HID-write paths to userspace; only Kotlin can hold the
+  `UsbDeviceConnection`. Specific bench-validated transports per §3.3:
+  Digirig = CP2102N RTS only; AIOC = CDC-ACM DTR=1/RTS=0 only (HID
+  surface present but firmware-disabled on ≥1.2.0); CM108 HID GPIO
+  retained for any other CM108-class hardware whose GPIO is wired
+  through.
 - **N4.** `pkg/platformproto/` is the single Go<->Kotlin contract.
   Schema bump + Hello version bump are coordinated. CI drift guard
   parallels invariant 11.
@@ -622,6 +684,19 @@ specifies the additions for the implementation plan to write.
   capture at full scale and that cpal needs an `ndk_context` populated
   by an APK JNI runtime, which a `/data/local/tmp` exec lacks. *Why:*
   Reverting to either path resurrects POC-A's bring-up failures.
+
+- **N11.** Android USB opens, `claimInterface(force=true)` calls, and
+  the first control transfer on a freshly opened device must run on
+  a worker thread, never on the dispatcher (Activity callback,
+  BroadcastReceiver `onReceive`, JS-bridge `@JavascriptInterface`).
+  POC-A learned this for USB enumeration (commit `24d9424`); POC-D
+  extended to opens after a permission-grant BroadcastReceiver
+  ANR'd within 5 s during the CP2102N's first `setLineEncoding`.
+  *Why:* USB host APIs that look fast in isolation can stall
+  hundreds of ms under real-hardware conditions, easily long enough
+  to trip Android's input-dispatch ANR. A single shared
+  `ExecutorService` per adapter is enough; no per-device threads
+  required.
 
 - **N9.** USB audio gain on Android is software-only. The audio HAL
   claims USB-Audio class devices on stream open and refuses
@@ -735,7 +810,7 @@ plan:
 | 3 | pending | 1 wk | `GraywolfService` hardening + `MainActivity` + `GoLauncher` + production-grade WebView wiring. End-to-end "tap icon, see graywolf SPA running on the phone" with no PTT or GPS yet. (Phase 3 is now smaller because POC-B-revised already proved the integration shape.) |
 | 4 | pending | 1 wk | `GpsAdapter` + `pkg/gps/android.go`. First useful end-to-end feature: phone position beacons over RF. |
 | 5 | pending | 1 wk | USB-serial PTT (Digirig path) + VOX (`NONE`). Hardware matrix coverage for those two paths. **TX audio path locked in here** (likely Kotlin `AudioTrack` symmetric to AudioPump RX). |
-| 5b | pending | 1 wk | USB-HID PTT (CM108 / AIOC path). Hardware matrix coverage. |
+| 5b | pending | 1 wk | USB-HID PTT (generic CM108-class hardware whose GPIO is wired through) + AIOC CDC-ACM-DTR PTT. Note: Digirig is fully covered by phase 5's CP2102N path; phase 5b adds AIOC and any other non-Digirig hardware. Hardware matrix coverage. |
 | 5c | pending (may slip to v1.1) | 1 wk | Bluetooth SPP PTT. Pairing UX, RFCOMM lifecycle, PTT timing measurement. |
 | 6 | pending | 1 wk | `make android` target, `release-android.yml`, signing, Play Console upload to internal track. |
 | 7 | pending | 1-2 wk | Polish, handbook page, wiki updates, beta cycle, Play Store first-submission review. |
@@ -943,9 +1018,10 @@ graywolf/
         mod.rs                      # JNI entry points (cfg target_os="android")
         audio.rs                    # consumer of Kotlin->Rust sample buffers (was poc-a-android/audio_record.rs)
       tx/
-        ptt_android_usb_serial.rs   # NEW
-        ptt_android_usb_hid.rs      # NEW
-        ptt_android_bt_spp.rs       # NEW
+        ptt_android_usb_serial.rs   # NEW (Digirig CP2102N RTS)
+        ptt_android_cdc_acm.rs      # NEW (AIOC CDC-ACM DTR=1/RTS=0)
+        ptt_android_usb_hid.rs      # NEW (generic CM108 HID GPIO)
+        ptt_android_bt_spp.rs       # NEW (Phase 5c)
   poc-a-android/                    # REMOVED after fold-in (was POC-A workspace member)
   Makefile                          # NEW targets: android-modem, android-graywolf, android
   .github/workflows/
