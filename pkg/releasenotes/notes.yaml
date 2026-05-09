@@ -11,7 +11,7 @@
   date: "2026-05-09"
   style: info
   schema_version: 1
-  title: "PTT improvements on the Channels page"
+  title: "PTT improvements, profiling, and runtime metrics"
   link: "#/channels"
   body: |
     Each channel card now shows which PTT method it is using, so you
@@ -26,6 +26,15 @@
     Channels backed by a KISS TNC handle their own PTT through the TNC
     itself, so Graywolf no longer accepts a separate PTT configuration
     on those channels and tells you why if you try.
+
+    There is a new optional -pprof flag that turns on a debug listener
+    for memory and CPU profiling, and the /metrics endpoint now reports
+    Go runtime stats so you can graph memory and goroutines over time.
+    See the monitoring page in the handbook for capture commands.
+
+    Graywolf also caps the in-memory station cache at 50,000 entries
+    so memory stays bounded under heavy APRS-IS traffic, and a few
+    smaller memory wins shave a couple of megabytes off resident size.
 
     Nothing to reconfigure.
 
