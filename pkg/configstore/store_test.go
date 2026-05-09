@@ -2,8 +2,11 @@ package configstore
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -118,6 +121,101 @@ func TestChannelAndPtt(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 ptt row, got %d", count)
+	}
+}
+
+func TestRekeyPttConfig(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	dev := &AudioDevice{Name: "a", Direction: "input", SourceType: "flac", SourcePath: "x.flac", SampleRate: 44100, Channels: 1, Format: "s16le"}
+	if err := s.CreateAudioDevice(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+	mkChan := func(name string) *Channel {
+		c := &Channel{
+			Name: name, InputDeviceID: U32Ptr(dev.ID),
+			ModemType: "afsk", BitRate: 1200, MarkFreq: 1200, SpaceFreq: 2200,
+			Profile: "A", NumSlicers: 1, FixBits: "none",
+		}
+		if err := s.CreateChannel(ctx, c); err != nil {
+			t.Fatalf("CreateChannel %s: %v", name, err)
+		}
+		return c
+	}
+	chA := mkChan("rxA")
+	chB := mkChan("rxB")
+	chC := mkChan("rxC")
+
+	pttA := &PttConfig{ChannelID: chA.ID, Method: "gpio", Device: "/dev/gpiochip0", GpioPin: 17}
+	if err := s.UpsertPttConfig(ctx, pttA); err != nil {
+		t.Fatalf("UpsertPttConfig A: %v", err)
+	}
+	originalID := pttA.ID
+
+	// Move A→B with field changes; row id preserved, A vacated, B populated.
+	moved := *pttA
+	moved.ChannelID = chB.ID
+	moved.GpioPin = 22
+	if err := s.RekeyPttConfig(ctx, chA.ID, &moved); err != nil {
+		t.Fatalf("RekeyPttConfig A→B: %v", err)
+	}
+	if moved.ID != originalID {
+		t.Fatalf("rekey changed row id: was %d, now %d", originalID, moved.ID)
+	}
+	if _, err := s.GetPttConfigForChannel(ctx, chA.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected A to have no PTT after rekey, got err=%v", err)
+	}
+	gotB, err := s.GetPttConfigForChannel(ctx, chB.ID)
+	if err != nil {
+		t.Fatalf("GetPttConfigForChannel B: %v", err)
+	}
+	if gotB.Method != "gpio" || gotB.GpioPin != 22 || gotB.ID != originalID {
+		t.Fatalf("expected B to carry rekeyed config, got %+v", gotB)
+	}
+
+	// Collision: C already has a PTT, so rekey B→C must fail without
+	// touching either row.
+	pttC := &PttConfig{ChannelID: chC.ID, Method: "cm108", Device: "hidraw0", GpioPin: 3}
+	if err := s.UpsertPttConfig(ctx, pttC); err != nil {
+		t.Fatalf("UpsertPttConfig C: %v", err)
+	}
+	clash := *gotB
+	clash.ChannelID = chC.ID
+	if err := s.RekeyPttConfig(ctx, chB.ID, &clash); !errors.Is(err, ErrPttChannelTaken) {
+		t.Fatalf("expected ErrPttChannelTaken, got %v", err)
+	}
+	stillB, err := s.GetPttConfigForChannel(ctx, chB.ID)
+	if err != nil || stillB.GpioPin != 22 {
+		t.Fatalf("expected B unchanged after collision, got=%+v err=%v", stillB, err)
+	}
+	stillC, err := s.GetPttConfigForChannel(ctx, chC.ID)
+	if err != nil || stillC.Method != "cm108" {
+		t.Fatalf("expected C unchanged after collision, got=%+v err=%v", stillC, err)
+	}
+
+	// Same-channel rekey is permitted (acts as in-place save).
+	same := *stillB
+	same.GpioPin = 27
+	if err := s.RekeyPttConfig(ctx, chB.ID, &same); err != nil {
+		t.Fatalf("RekeyPttConfig same-channel: %v", err)
+	}
+	gotB2, err := s.GetPttConfigForChannel(ctx, chB.ID)
+	if err != nil {
+		t.Fatalf("GetPttConfigForChannel B (post-same): %v", err)
+	}
+	if gotB2.GpioPin != 27 {
+		t.Fatalf("expected GpioPin=27 after same-channel rekey, got %+v", gotB2)
+	}
+
+	// Missing source row → ErrRecordNotFound.
+	chD := mkChan("rxD")
+	miss := &PttConfig{ChannelID: chD.ID, Method: "none"}
+	if err := s.RekeyPttConfig(ctx, chD.ID, miss); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected ErrRecordNotFound for missing source, got %v", err)
 	}
 }
 

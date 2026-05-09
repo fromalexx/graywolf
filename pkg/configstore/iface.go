@@ -25,6 +25,8 @@ type ConfigStore interface {
 	// PTT
 	UpsertPttConfig(ctx context.Context, p *PttConfig) error
 	GetPttConfigForChannel(ctx context.Context, channelID uint32) (*PttConfig, error)
+	RekeyPttConfig(ctx context.Context, oldChannelID uint32, p *PttConfig) error
+	DeletePttConfig(ctx context.Context, channelID uint32) error
 
 	// TX timing
 	ListTxTimings(ctx context.Context) ([]TxTiming, error)

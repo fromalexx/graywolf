@@ -269,8 +269,14 @@ func (s *Server) getPttConfig(w http.ResponseWriter, r *http.Request) {
 		})
 }
 
-// updatePttConfig upserts the PTT config for a channel, pinning the
-// channel id from the URL over anything the body carries.
+// updatePttConfig updates the PTT config for the URL-specified channel.
+// When the body's channel_id matches the URL, the existing row is
+// upserted in place. When it differs (and is non-zero), the row is
+// atomically rekeyed onto the new channel — PTT is one-row-per-channel
+// (uniqueIndex on channel_id), so the old channel loses its PTT
+// configuration and the new channel gains it. The rekey runs in a
+// single transaction; a target-channel collision is reported as 400
+// rather than silently clobbering an existing config.
 //
 // @Summary  Update PTT config
 // @Tags     ptt
@@ -292,6 +298,20 @@ func (s *Server) updatePttConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	handleUpdate[dto.PttRequest](s, w, r, "upsert ptt config", id,
 		func(ctx context.Context, channelID uint32, req dto.PttRequest) (configstore.PttConfig, error) {
+			if req.ChannelID != 0 && req.ChannelID != channelID {
+				m := req.ToModel()
+				if err := s.store.RekeyPttConfig(ctx, channelID, &m); err != nil {
+					if errors.Is(err, configstore.ErrPttChannelTaken) {
+						return configstore.PttConfig{}, validationError(err)
+					}
+					return configstore.PttConfig{}, err
+				}
+				// Bridge reload is global (StopAudio → re-push config
+				// → StartAudio), so a single notify refreshes both the
+				// vacated and the newly-targeted channels.
+				s.notifyBridgeForChannel(ctx, m.ChannelID)
+				return m, nil
+			}
 			m := req.ToUpdate(channelID)
 			if err := s.store.UpsertPttConfig(ctx, &m); err != nil {
 				return configstore.PttConfig{}, err

@@ -324,6 +324,16 @@
 
   function validate() {
     const e = {};
+    // PTT is keyed by channel_id (one config per channel). When editing
+    // and the user picks a different channel, the save flow rekeys the
+    // row. Refuse here if the target channel already has a config —
+    // upsert would silently clobber it.
+    if (editing && String(form.channel_id) !== String(editing.channel_id)) {
+      const target = parseInt(form.channel_id, 10);
+      if (items.some(p => p.channel_id === target)) {
+        e.channel_id = `${channelName(target) || 'That channel'} already has a PTT configuration. Delete it first.`;
+      }
+    }
     if (form.method === 'rigctld') {
       const host = (form.rigctld_host || '').trim();
       if (!host) {
@@ -371,6 +381,10 @@
     delete data.rigctld_port;
     try {
       if (editing) {
+        // PUT addresses the original channel_id (the row's current
+        // key); the body carries the chosen channel_id. When the two
+        // differ, the server atomically rekeys the row in a single
+        // transaction — old channel loses PTT, new channel gains it.
         await api.put(`/ptt/${editing.channel_id}`, data);
         toasts.success('PTT config updated');
       } else {
@@ -642,6 +656,7 @@
 <!-- Add/Edit modal -->
 <Modal bind:open={modalOpen} title={editing ? 'Edit PTT Config' : 'New PTT Config'} onClose={handleModalClose}>
     <FormField label="Channel" id="ptt-ch"
+      error={errors.channel_id}
       hint="Radio channel this PTT controls. Defined on the Channels page.">
       <Select id="ptt-ch" bind:value={form.channel_id} options={channelOptions} />
     </FormField>

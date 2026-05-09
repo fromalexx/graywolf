@@ -781,6 +781,39 @@ func (s *Store) DeletePttConfig(ctx context.Context, channelID uint32) error {
 	return s.db.WithContext(ctx).Where("channel_id = ?", channelID).Delete(&PttConfig{}).Error
 }
 
+// ErrPttChannelTaken is returned by RekeyPttConfig when the target
+// channel already has a PttConfig. Callers route this to HTTP 409 /
+// validation error rather than a generic 500.
+var ErrPttChannelTaken = errors.New("ptt config already exists for target channel")
+
+// RekeyPttConfig moves the PttConfig at oldChannelID onto p.ChannelID
+// atomically, applying any other field updates from p in the same
+// transaction. Preserves the row's autoincrement ID. Returns
+// ErrPttChannelTaken when p.ChannelID != oldChannelID and the target
+// already has a config (the unique index on channel_id would otherwise
+// fail with a driver-specific error). Returns gorm.ErrRecordNotFound
+// when no row exists at oldChannelID.
+func (s *Store) RekeyPttConfig(ctx context.Context, oldChannelID uint32, p *PttConfig) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing PttConfig
+		if err := tx.Where("channel_id = ?", oldChannelID).First(&existing).Error; err != nil {
+			return err
+		}
+		if p.ChannelID != oldChannelID {
+			var clash PttConfig
+			err := tx.Where("channel_id = ?", p.ChannelID).First(&clash).Error
+			if err == nil {
+				return ErrPttChannelTaken
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		p.ID = existing.ID
+		return tx.Save(p).Error
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Channel validation
 // ---------------------------------------------------------------------------
