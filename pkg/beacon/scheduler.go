@@ -163,8 +163,7 @@ func (s *Scheduler) SendNow(ctx context.Context, id uint32) error {
 	if found == nil {
 		return fmt.Errorf("beacon: id %d not found", id)
 	}
-	s.sendBeaconImmediate(ctx, *found)
-	return nil
+	return s.sendBeaconImmediate(ctx, *found)
 }
 
 // Run drives the scheduler's single heap-based run loop until ctx is
@@ -346,18 +345,25 @@ func (s *Scheduler) fireAsync(ctx context.Context, p *beaconPlan) {
 // sendBeaconImmediate builds and submits one beacon frame, bypassing
 // the txgovernor's dedup window. Used by SendNow where the operator
 // explicitly requests transmission regardless of recent duplicates.
-func (s *Scheduler) sendBeaconImmediate(ctx context.Context, b Config) {
-	s.sendBeaconWith(ctx, b, true)
+// Returns a *SendNowError on any failure so the operator-driven
+// caller can surface a meaningful reason; nil on success.
+func (s *Scheduler) sendBeaconImmediate(ctx context.Context, b Config) error {
+	return s.sendBeaconWith(ctx, b, true)
 }
 
-// sendBeacon builds and submits one beacon frame.
+// sendBeacon builds and submits one beacon frame. Errors are logged
+// inside sendBeaconWith and dropped here: the scheduled fire path has
+// no upstream caller to surface them to.
 func (s *Scheduler) sendBeacon(ctx context.Context, b Config) {
-	s.sendBeaconWith(ctx, b, false)
+	_ = s.sendBeaconWith(ctx, b, false)
 }
 
 // sendBeaconWith is the shared implementation for sendBeacon and
-// sendBeaconImmediate.
-func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool) {
+// sendBeaconImmediate. It always logs failures and notifies observers
+// (preserving existing scheduled-path behavior); additionally it
+// returns a *SendNowError on failure so SendNow can surface the
+// reason to the operator. nil on success.
+func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool) error {
 	name := beaconName(b)
 	if s.channelModes != nil {
 		mode, _ := s.channelModes.ModeForChannel(ctx, b.Channel)
@@ -367,7 +373,10 @@ func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool
 			if so, ok := s.observer.(SkipObserver); ok && so != nil {
 				so.OnBeaconSkipped(name, "packet_mode")
 			}
-			return
+			return &SendNowError{
+				Kind: SendNowErrorChannelMode,
+				Err:  fmt.Errorf("channel %d is in packet mode and cannot transmit APRS beacons", b.Channel),
+			}
 		}
 	}
 	info, err := s.buildInfo(ctx, b)
@@ -377,7 +386,7 @@ func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool
 		// "encode" errors in the AX.25 sense, so they do not feed the
 		// encode counter. The root cause is usually configuration.
 		s.logger.Warn("beacon build", "id", b.ID, "type", b.Type, "err", err)
-		return
+		return &SendNowError{Kind: SendNowErrorBuild, Err: err}
 	}
 	frame, err := ax25.NewUIFrame(b.Source, b.Dest, b.Path, []byte(info))
 	if err != nil {
@@ -389,7 +398,7 @@ func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool
 		if eo, ok := s.observer.(ErrorObserver); ok && eo != nil {
 			eo.OnEncodeError(name)
 		}
-		return
+		return &SendNowError{Kind: SendNowErrorEncode, Err: err}
 	}
 	src := txgovernor.SubmitSource{
 		Kind:      "beacon",
@@ -403,14 +412,16 @@ func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool
 		if eo, ok := s.observer.(ErrorObserver); ok && eo != nil {
 			eo.OnSubmitError(name, reason)
 		}
-		return
+		return &SendNowError{Kind: SendNowErrorSubmit, Err: err}
 	}
 	s.logger.Info("beacon sent", "id", b.ID, "type", b.Type, "channel", b.Channel, "info", info)
 	if s.observer != nil {
 		s.observer.OnBeaconSent(b.Type)
 	}
 
-	// Optionally duplicate the beacon to APRS-IS.
+	// Optionally duplicate the beacon to APRS-IS. APRS-IS leg failures
+	// do not cause SendNow to report failure: the RF leg already
+	// succeeded, and an offline IS path is normal.
 	if b.SendToAPRSIS && s.isSink != nil {
 		line := formatTNC2(b.Source, b.Dest, b.Path, info)
 		if err := s.isSink.SendLine(line); err != nil {
@@ -419,6 +430,7 @@ func (s *Scheduler) sendBeaconWith(ctx context.Context, b Config, skipDedup bool
 			s.logger.Info("beacon sent to aprs-is", "id", b.ID, "line", line)
 		}
 	}
+	return nil
 }
 
 // formatTNC2 renders a beacon as a TNC-2 monitor line for APRS-IS.

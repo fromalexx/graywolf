@@ -2,9 +2,11 @@ package webapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/chrissnell/graywolf/pkg/beacon"
 	"github.com/chrissnell/graywolf/pkg/configstore"
 	"github.com/chrissnell/graywolf/pkg/webapi/dto"
 	"github.com/chrissnell/graywolf/pkg/webtypes"
@@ -185,6 +187,8 @@ func (s *Server) deleteBeacon(w http.ResponseWriter, r *http.Request) {
 // @Success  200 {object} dto.BeaconSendResponse
 // @Failure  400 {object} webtypes.ErrorResponse
 // @Failure  404 {object} webtypes.ErrorResponse
+// @Failure  409 {object} webtypes.ErrorResponse
+// @Failure  422 {object} webtypes.ErrorResponse
 // @Failure  500 {object} webtypes.ErrorResponse
 // @Failure  503 {object} webtypes.ErrorResponse
 // @Security CookieAuth
@@ -204,6 +208,24 @@ func (s *Server) sendBeacon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.beaconSendNow(r.Context(), id); err != nil {
+		// Map beacon SendNow failure kinds to HTTP statuses so the UI
+		// can surface a useful reason instead of a misleading "sent"
+		// toast (issue #99). Build/encode are operator-config issues;
+		// channel-mode is a config conflict; submit is transient.
+		var sne *beacon.SendNowError
+		if errors.As(err, &sne) {
+			switch sne.Kind {
+			case beacon.SendNowErrorBuild, beacon.SendNowErrorEncode:
+				writeJSON(w, http.StatusUnprocessableEntity, webtypes.ErrorResponse{Error: sne.Error()})
+				return
+			case beacon.SendNowErrorChannelMode:
+				writeJSON(w, http.StatusConflict, webtypes.ErrorResponse{Error: sne.Error()})
+				return
+			case beacon.SendNowErrorSubmit:
+				writeJSON(w, http.StatusServiceUnavailable, webtypes.ErrorResponse{Error: sne.Error()})
+				return
+			}
+		}
 		s.internalError(w, r, "beacon send now", err)
 		return
 	}
