@@ -1,3 +1,5 @@
+import com.google.protobuf.gradle.proto
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -26,10 +28,13 @@ android {
             proto {
                 srcDir("../../proto")
                 // Filter: only platform.proto is consumed by the Android build.
-                // graywolf.proto lacks `option java_package` and would either land
-                // in an unexpected default Java package or collide with Go-side
-                // bindings. Filtering avoids the question entirely.
-                include("platform.proto")
+                // graywolf.proto lacks `option java_package` and would land
+                // in the default Java package matching its proto package
+                // (`graywolf`), bloating the APK with unused IPC types.
+                // `include("platform.proto")` is silently ignored on the
+                // AGP-bridged proto SourceDirectorySet under
+                // protobuf-gradle-plugin 0.9.4; explicit `exclude` works.
+                exclude("graywolf.proto")
             }
         }
     }
