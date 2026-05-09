@@ -17,7 +17,7 @@
   import { mountMyPositionLayer } from '../lib/map/layers/my-position.js';
   import { renderStationPopupHTML } from '../lib/map/popup.js';
   import { unitsState } from '../lib/settings/units-store.svelte.js';
-  import { mapState } from '../lib/map/map-store.svelte.js';
+  import { mapState, MY_POSITION_ZOOM } from '../lib/map/map-store.svelte.js';
   import { toMaidenhead } from '../lib/map/maidenhead.js';
   import { fmtLat, fmtLon, timeAgo } from '../lib/map/popup-helpers.js';
 
@@ -309,8 +309,27 @@
     dataStore.setTimerange(timerangeSec * 1000);
   });
 
-  // One-shot auto-fit: after the first poll completes, frame all stations
-  // currently in the data store. Empty result → leave at planet view.
+  // One-shot recenter on the station's "My Position" as soon as the data
+  // store reports a valid fix. Takes precedence over fit-to-stations: the
+  // operator's own location is the more useful default than a bounding
+  // box of every callsign heard in the last hour. Suppressed when a
+  // persisted view exists — restoring that view is what the operator
+  // wants on reload.
+  $effect(() => {
+    const my = dataStore.myPosition;
+    if (!my || !mapRef || didAutoFit) return;
+    didAutoFit = true;
+    mapRef.easeTo({
+      center: [my.lon, my.lat],
+      zoom: MY_POSITION_ZOOM,
+      duration: 600,
+    });
+  });
+
+  // Fallback auto-fit: after the first poll completes, frame all stations
+  // currently in the data store. Empty result → leave at world view. Only
+  // fires when the My Position recenter above did not — i.e., the station
+  // has no GPS lock and no configured position.
   $effect(() => {
     const t = dataStore.lastFetchAt;
     if (!t || !mapRef || didAutoFit) return;
