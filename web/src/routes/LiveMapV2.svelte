@@ -17,7 +17,7 @@
   import { mountMyPositionLayer } from '../lib/map/layers/my-position.js';
   import { renderStationPopupHTML } from '../lib/map/popup.js';
   import { unitsState } from '../lib/settings/units-store.svelte.js';
-  import { mapState } from '../lib/map/map-store.svelte.js';
+  import { mapState, MY_POSITION_ZOOM } from '../lib/map/map-store.svelte.js';
   import { toMaidenhead } from '../lib/map/maidenhead.js';
   import { fmtLat, fmtLon, timeAgo } from '../lib/map/popup-helpers.js';
 
@@ -309,17 +309,37 @@
     dataStore.setTimerange(timerangeSec * 1000);
   });
 
-  // One-shot auto-fit: after the first poll completes, frame all stations
-  // currently in the data store. Empty result → leave at planet view.
+  // One-shot recenter on the station's "My Position" as soon as the data
+  // store reports a valid fix. Takes precedence over fit-to-stations: the
+  // operator's own location is the more useful default than a bounding
+  // box of every callsign heard in the last hour. Suppressed when a
+  // persisted view exists — restoring that view is what the operator
+  // wants on reload.
+  $effect(() => {
+    const my = dataStore.myPosition;
+    if (!my || !mapRef || didAutoFit) return;
+    didAutoFit = true;
+    mapRef.easeTo({
+      center: [my.lon, my.lat],
+      zoom: MY_POSITION_ZOOM,
+      duration: 600,
+    });
+  });
+
+  // Fallback auto-fit: after the first poll completes, frame all stations
+  // currently in the data store. Only fires when the My Position recenter
+  // above did not — i.e., the station has no GPS lock and no configured
+  // position. If there are also no heard stations, the map stays at the
+  // world view, and didAutoFit stays false so a later myPosition arrival
+  // can still claim the camera.
   $effect(() => {
     const t = dataStore.lastFetchAt;
     if (!t || !mapRef || didAutoFit) return;
-    didAutoFit = true;
-    fitToStations();
+    if (fitToStations()) didAutoFit = true;
   });
 
   function fitToStations() {
-    if (!mapRef) return;
+    if (!mapRef) return false;
     const coords = [];
     for (const s of dataStore.stations.values()) {
       const p = s.positions && s.positions[0];
@@ -327,14 +347,15 @@
         coords.push([p.lon, p.lat]);
       }
     }
-    if (coords.length === 0) return;
+    if (coords.length === 0) return false;
     if (coords.length === 1) {
       mapRef.easeTo({ center: coords[0], zoom: 9, duration: 600 });
-      return;
+      return true;
     }
     const bounds = new maplibregl.LngLatBounds(coords[0], coords[0]);
     for (let i = 1; i < coords.length; i++) bounds.extend(coords[i]);
     mapRef.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 600 });
+    return true;
   }
 
   // ---- Status bar derivations ----
