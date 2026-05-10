@@ -165,16 +165,15 @@ class GraywolfService : Service() {
             )
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Phase 3 = MICROPHONE only. Android 14 requires each FGS
-            // type declared in the manifest to come paired with its
-            // access perm (USB_DEVICE for connectedDevice, ACCESS_*_
-            // LOCATION for location). Those access perms land in
-            // phases 5 (USB-PTT) and 4 (GPS) respectively; declaring
-            // the FGS types here without them throws SecurityException
-            // at startForeground.
+            // Phase 4a adds LOCATION FGS type alongside MICROPHONE.
+            // Android 14 requires each FGS type declared in the
+            // manifest to come paired with its access perm
+            // (ACCESS_FINE_LOCATION for location). USB_DEVICE pairing
+            // for connectedDevice lands in phase 5.
             startForeground(
                 NOTIF_ID, notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
         } else {
             startForeground(NOTIF_ID, notif)
