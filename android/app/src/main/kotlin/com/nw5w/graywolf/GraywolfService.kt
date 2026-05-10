@@ -57,6 +57,7 @@ class GraywolfService : Service() {
     private fun bootGoChild(): Boolean {
         val bearerToken = (application as GraywolfApp).bearerToken
         val goPath = File(applicationInfo.nativeLibraryDir, "libgraywolf.so").absolutePath
+        val tileCacheDir = File(filesDir, "tiles").also { it.mkdirs() }
         val launcher = GoLauncher(
             executablePath = goPath,
             env = mapOf(
@@ -69,6 +70,10 @@ class GraywolfService : Service() {
                 "GRAYWOLF_PLATFORM_SOCKET" to "@" + platformSocketPath(),
                 "GRAYWOLF_LISTEN" to "127.0.0.1:8080",
                 "GRAYWOLF_LISTEN_TOKEN" to bearerToken,
+                "GRAYWOLF_DB" to File(filesDir, "graywolf.db").absolutePath,
+                "GRAYWOLF_HISTORY_DB" to File(filesDir, "graywolf-history.db").absolutePath,
+                "GRAYWOLF_TILE_CACHE" to tileCacheDir.absolutePath,
+                "GRAYWOLF_PLATFORM" to "android",
             ),
         )
         val ok = launcher.startAndAwaitReady(10_000)
@@ -131,11 +136,16 @@ class GraywolfService : Service() {
             )
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Phase 3 = MICROPHONE only. Android 14 requires each FGS
+            // type declared in the manifest to come paired with its
+            // access perm (USB_DEVICE for connectedDevice, ACCESS_*_
+            // LOCATION for location). Those access perms land in
+            // phases 5 (USB-PTT) and 4 (GPS) respectively; declaring
+            // the FGS types here without them throws SecurityException
+            // at startForeground.
             startForeground(
                 NOTIF_ID, notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
             )
         } else {
             startForeground(NOTIF_ID, notif)

@@ -9,8 +9,13 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- FGS_CONNECTED_DEVICE (phase 5) and FGS_LOCATION (phase 4) are
+         declared in their respective phases together with the access
+         perm Android 14 requires alongside (USB_DEVICE / ACCESS_*_LOCATION).
+         Declaring them here without the access perms makes startForeground
+         throw SecurityException at API 34. -->
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/> -->
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/> -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
@@ -39,6 +44,6 @@
         <service
             android:name=".GraywolfService"
             android:exported="false"
-            android:foregroundServiceType="microphone|connectedDevice|location"/>
+            android:foregroundServiceType="microphone"/>
     </application>
 </manifest>

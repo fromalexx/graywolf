@@ -159,28 +159,41 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	a.metrics = metrics.New()
 
 	// --- Modem binary resolution + version banner ----------------------
-	resolvedModem, err := ResolveModemPath(a.cfg.ModemPath)
-	if err != nil {
-		return fmt.Errorf("locate graywolf-modem: %w", err)
-	}
-	a.resolvedModem = resolvedModem
-	pttdevice.SetModemPath(resolvedModem)
-	modemVersion, verr := QueryModemVersion(resolvedModem)
-	if verr != nil {
-		// Not fatal: log and move on. If the binary is actually broken,
-		// bridge.Start's handshake will surface it with a better error.
-		a.logger.Warn("query graywolf-modem version",
-			"path", resolvedModem, "err", verr)
-		modemVersion = "unknown"
-	}
-	a.logger.Info("starting graywolf",
-		"graywolf", a.cfg.FullVersion(),
-		"graywolf-modem", modemVersion)
-	if modemVersion != "unknown" && modemVersion != a.cfg.FullVersion() {
-		a.logger.Warn("graywolf and graywolf-modem versions disagree — possibly a mixed build",
+	//
+	// Skipped on Android: cfg.ModemSocketPath != "" means modembridge
+	// runs in connect-only mode (the Service has already loaded the
+	// modem cdylib in-process and exposed it at the UDS path). There
+	// is no on-disk graywolf-modem binary to resolve or version-check.
+	var resolvedModem string
+	if a.cfg.ModemSocketPath == "" {
+		var err error
+		resolvedModem, err = ResolveModemPath(a.cfg.ModemPath)
+		if err != nil {
+			return fmt.Errorf("locate graywolf-modem: %w", err)
+		}
+		a.resolvedModem = resolvedModem
+		pttdevice.SetModemPath(resolvedModem)
+		modemVersion, verr := QueryModemVersion(resolvedModem)
+		if verr != nil {
+			// Not fatal: log and move on. If the binary is actually broken,
+			// bridge.Start's handshake will surface it with a better error.
+			a.logger.Warn("query graywolf-modem version",
+				"path", resolvedModem, "err", verr)
+			modemVersion = "unknown"
+		}
+		a.logger.Info("starting graywolf",
 			"graywolf", a.cfg.FullVersion(),
-			"graywolf-modem", modemVersion,
-			"modem_path", resolvedModem)
+			"graywolf-modem", modemVersion)
+		if modemVersion != "unknown" && modemVersion != a.cfg.FullVersion() {
+			a.logger.Warn("graywolf and graywolf-modem versions disagree — possibly a mixed build",
+				"graywolf", a.cfg.FullVersion(),
+				"graywolf-modem", modemVersion,
+				"modem_path", resolvedModem)
+		}
+	} else {
+		a.logger.Info("starting graywolf (modem connect-only)",
+			"graywolf", a.cfg.FullVersion(),
+			"modem_socket", a.cfg.ModemSocketPath)
 	}
 
 	// --- Packet log ----------------------------------------------------
