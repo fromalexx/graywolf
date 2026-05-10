@@ -36,7 +36,7 @@
 | 16 | Manifest perms + types + cleartext narrowing | ✅ | `033cfc4` (network_security_config.xml scoped to 127.0.0.1; FGS bitmap=microphone+connectedDevice+location) |
 | 17 | SPA reads bearer token from JS bridge | ✅ | `4b82c6a` (androidBridge.js cached read from globalThis.GraywolfWebInterface) |
 | 17a | api.js 401 path skips #/login on Android | ✅ | `40c9b7c` (bridge-gated branch + node:test coverage) |
-| 18 | Fetch coverage exhaustive | ⏳ deferred to operator | Static enumeration + Chrome devtools route walk requires running APK on T865 (see HW task instructions below). secureFetch handles Request objects + caller-supplied headers; secureWebSocket via class extends WebSocket. |
+| 18 | Fetch coverage exhaustive | ⏳ partial — local pipeline ✅, HW route walk pending | Cross-compile arm64+amd64 ✅; npm build ✅; assembleDebug ✅ (APK 48.9M); Kotlin tests ✅. Chrome devtools route walk on T865 still pending. |
 | 19 | SPA renders end-to-end on Android | ⏳ deferred to operator | Requires APK install on T865 + Chrome remote devtools |
 | 20 | Cold-start succeeds on T865 | ⏳ deferred to operator | Logcat capture + screenshots (see HW task instructions below) |
 | 21 | Supervisor restart works under fault injection | ⏳ deferred to operator | SIGKILL of Go child via `adb shell run-as` |
@@ -45,8 +45,12 @@
 
 ## APK size baseline
 - Phase 2 baseline: 35,521,452 bytes (~34M)
-- Phase 3 expected delta: +5-7M from production SPA embed (vs phase 2's pocb_index.html stub)
-- Actual size: deferred to operator's `./gradlew assembleDebug`
+- Phase 3 actual: **48,899,874 bytes (~47M); +13.4M delta**
+- SPA is embedded inside libgraywolf.so (web/embed.go go:embed); per-ABI .so sizes:
+  - lib/arm64-v8a/libgraywolf.so: 34,323,208 bytes
+  - lib/arm64-v8a/libgraywolfmodem.so: 1,183,952 bytes
+  - lib/x86_64/libgraywolf.so: 34,455,000 bytes
+  - lib/x86_64/libgraywolfmodem.so: 1,102,512 bytes
 
 ## Drift between phase-3 spec and as-shipped behavior
 
