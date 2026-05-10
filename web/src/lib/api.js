@@ -1,6 +1,8 @@
 // Thin API client wrapping all fetch calls to /api/*.
 // Returns mock data when the API is unreachable (dev without backend).
 
+import { getBearerToken } from './androidBridge.js';
+
 const MOCK_DELAY = 200;
 
 // ApiError carries the structured body from a non-2xx response so
@@ -38,6 +40,15 @@ async function request(method, path, body = null) {
     return getMockData(method, path, body);
   }
   if (res.status === 401) {
+    if (getBearerToken() !== null) {
+      // Android: no login route. The bearer token is per-launch and
+      // injected by the Service; a 401 here means the Service rotated
+      // the token (supervisor restart) or the wrapper failed to inject.
+      // Throw without navigating; callers surface the error and the
+      // operator-visible recovery is "Stop + relaunch" or wait for
+      // WebView reload on Service restart.
+      throw new ApiError(401, { error: 'Unauthorized' });
+    }
     window.location.hash = '#/login';
     throw new ApiError(401, { error: 'Unauthorized' });
   }
