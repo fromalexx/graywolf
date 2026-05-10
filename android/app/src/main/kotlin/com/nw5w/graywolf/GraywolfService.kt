@@ -133,7 +133,9 @@ class GraywolfService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIF_ID, notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
         } else {
             startForeground(NOTIF_ID, notif)
