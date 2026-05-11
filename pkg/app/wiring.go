@@ -232,20 +232,38 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	// boots respect the persisted state.
 	if a.cfg.Platform == "android" {
 		if devs, err := a.store.ListAudioDevices(ctx); err == nil && len(devs) == 0 {
-			seed := &configstore.AudioDevice{
-				Name:       "Android Default Mic",
-				Direction:  "input",
-				SourceType: "soundcard",
-				SourcePath: "android-default",
-				SampleRate: 48000,
-				Channels:   1,
-				Format:     "s16le",
-			}
-			if err := a.store.CreateAudioDevice(ctx, seed); err != nil {
-				a.logger.Warn("seed audio device failed", "err", err)
-			} else {
-				a.logger.Info("seeded audio device (android first-boot default)",
-					"id", seed.ID, "name", seed.Name)
+			// One input row + one output row. AudioPump (Kotlin)
+			// captures from the system default mic and renders to
+			// the system default speaker regardless of any DB rows;
+			// the seed pair just gives the SPA's UI something to
+			// show + something to bind a channel to.
+			for _, seed := range []configstore.AudioDevice{
+				{
+					Name:       "Android Default Mic",
+					Direction:  "input",
+					SourceType: "soundcard",
+					SourcePath: "android-default",
+					SampleRate: 48000,
+					Channels:   1,
+					Format:     "s16le",
+				},
+				{
+					Name:       "Android Default Speaker",
+					Direction:  "output",
+					SourceType: "soundcard",
+					SourcePath: "android-default",
+					SampleRate: 48000,
+					Channels:   1,
+					Format:     "s16le",
+				},
+			} {
+				s := seed
+				if err := a.store.CreateAudioDevice(ctx, &s); err != nil {
+					a.logger.Warn("seed audio device failed", "name", s.Name, "err", err)
+				} else {
+					a.logger.Info("seeded audio device (android first-boot default)",
+						"id", s.ID, "name", s.Name, "direction", s.Direction)
+				}
 			}
 		}
 	}
