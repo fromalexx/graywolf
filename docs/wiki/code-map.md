@@ -128,7 +128,7 @@ The split is enforced by [invariant 9](invariants.md).
 | AX.25 transcript store | `pkg/configstore/ax25_transcripts.go` — `AX25TranscriptSession` + `AX25TranscriptEntry`. Bridge calls `transcriptRecorder.Begin/Append/End` when the operator runs `Ctrl-]` `transcript on`; the per-session writer logs every RX/TX byte block plus state-change + error events. |
 | Wiring entry | `pkg/app/wiring.go` — injects `*configstore.Store` as `ChannelModes` into beacon/digi/igate/messages constructors. |
 | REST | `webapi/channels.go` accepts `mode` on POST/PUT; `webapi/messages_config.go` exposes GET/PUT `/api/messages/config` with packet-mode validation. |
-| UI | `web/src/routes/Channels.svelte` shows mode selector + badge; `web/src/routes/Preferences.svelte` shows messages TX-channel selector filtered to non-packet channels. |
+| UI | `web/src/routes/Channels.svelte` shows mode selector + badge; `web/src/routes/MessagesSettings.svelte` shows messages TX-channel selector filtered to non-packet channels. |
 
 See [invariant 23](invariants.md) for the TX-gating contract.
 
