@@ -98,6 +98,11 @@ func TestConvergenceListAudio(t *testing.T) {
 		t.Skip("graywolf-modem binary not found; build with `cargo build --release` to enable")
 	}
 
+	// NOTE: this test asserts the JSON *shape* contract only, not
+	// the value of `recommended`. The flare `--list-audio` Recommended
+	// is a string heuristic; the live web picker probe-verifies it and
+	// the two intentionally diverge for cheap USB capture chips. Do not
+	// add a cross-check expecting flare/live parity on `recommended`.
 	stdout, err := runModemListing(bin, "--list-audio")
 	if err != nil {
 		t.Fatalf("--list-audio: %v", err)

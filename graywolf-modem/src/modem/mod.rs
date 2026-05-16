@@ -672,25 +672,83 @@ impl Modem {
     }
 
     fn handle_enumerate_devices(&self, req: EnumerateAudioDevices) {
-        let devices = enumerate_audio_devices(req.include_output);
-        let msg = IpcMessage {
-            payload: Some(Payload::AudioDeviceList(AudioDeviceList {
-                request_id: req.request_id,
-                devices,
-            })),
+        // Snapshot the pcm_ids currently held open by live capture
+        // streams, with the rate/channels they are running at. The
+        // enumerator surfaces these from cache rather than probing
+        // in-use hardware — probing a device a running radio holds can
+        // disrupt it, and cpal stops listing a held raw hw: device so a
+        // naive rescan loses it entirely.
+        let cfg_for = |id: &u32| -> Option<(String, u32, u32)> {
+            self.audio_configs.get(id).and_then(|acfg| {
+                if acfg.source_type == "soundcard" && !acfg.device_name.is_empty() {
+                    Some((acfg.device_name.clone(), acfg.sample_rate, acfg.channels))
+                } else {
+                    None
+                }
+            })
         };
-        if let Err(e) = self.handle.send(&msg) {
-            eprintln!("graywolf-modem: send AudioDeviceList failed: {}", e);
+        let mut in_use_input: HashMap<String, (u32, u32)> = HashMap::new();
+        for id in self.active_devices.keys() {
+            if let Some((name, sr, ch)) = cfg_for(id) {
+                in_use_input.insert(name, (sr, ch));
+            }
         }
+        // Output devices held by the TX worker. The AIOC shares one PCM
+        // for capture + playback, so once RX holds it the output path's
+        // supported_output_configs() fails and the old enumeration drops
+        // the device. Surface configured/in-use outputs from cache too.
+        let mut in_use_output: HashMap<String, (u32, u32)> = HashMap::new();
+        for id in self.output_devices.keys() {
+            if let Some((name, sr, ch)) = cfg_for(id) {
+                in_use_output.insert(name, (sr, ch));
+            }
+        }
+
+        // Probing candidate PCMs takes up to a few hundred ms per idle
+        // card; run off the IPC thread so control messages keep flowing
+        // (mirrors handle_scan_input_levels).
+        let handle = self.handle.clone();
+        std::thread::Builder::new()
+            .name("enumerate-devices".into())
+            .spawn(move || {
+                let devices = enumerate_audio_devices(
+                    req.include_output,
+                    &in_use_input,
+                    &in_use_output,
+                );
+                let msg = IpcMessage {
+                    payload: Some(Payload::AudioDeviceList(AudioDeviceList {
+                        request_id: req.request_id,
+                        devices,
+                    })),
+                };
+                if let Err(e) = handle.send(&msg) {
+                    eprintln!("graywolf-modem: send AudioDeviceList failed: {}", e);
+                }
+            })
+            .ok();
     }
 
     fn handle_scan_input_levels(&self, req: ScanInputLevels) {
+        // pcm_ids held open by a running channel — the scanner reports
+        // these as "in use" instead of failing to open a busy device.
+        let mut in_use_input: HashMap<String, (u32, u32)> = HashMap::new();
+        for id in self.active_devices.keys() {
+            if let Some(acfg) = self.audio_configs.get(id) {
+                if acfg.source_type == "soundcard" && !acfg.device_name.is_empty() {
+                    in_use_input.insert(
+                        acfg.device_name.clone(),
+                        (acfg.sample_rate, acfg.channels),
+                    );
+                }
+            }
+        }
         let handle = self.handle.clone();
         std::thread::Builder::new()
             .name("scan-input-levels".into())
             .spawn(move || {
                 let duration_ms = if req.duration_ms == 0 { 500 } else { req.duration_ms };
-                let results = scan_input_levels(duration_ms);
+                let results = scan_input_levels(duration_ms, &in_use_input);
                 let msg = IpcMessage::input_level_scan_result(InputLevelScanResult {
                     request_id: req.request_id,
                     devices: results,
@@ -1369,6 +1427,11 @@ fn is_useful_alsa_device(_pcm_id: &str) -> bool {
 /// Shared between input and output enumeration — the only difference is
 /// which config query method (`supported_input_configs` vs
 /// `supported_output_configs`) the caller passes via `get_configs`.
+///
+/// Non-Linux only: Linux input/output go through
+/// `collect_input_devices_linux` / `collect_output_devices_linux`, which
+/// add physical-card dedup, capture probing, and the in-use cache.
+#[cfg(not(target_os = "linux"))]
 #[allow(deprecated)] // DeviceTrait::name() gives the raw pcm_id we need
 fn collect_devices<I>(
     devices: impl Iterator<Item = cpal::Device>,
@@ -1466,8 +1529,317 @@ where
     out
 }
 
+/// Linux capture-device collection. Three behaviors:
+///
+/// 1. **Dedup** — cpal's ALSA backend reports the same physical card
+///    under numeric (`hw:CARD=1`) and symbolic (`hw:CARD=Device`)
+///    aliases. We canonicalize via `/proc/asound/cards` and emit one
+///    entry per physical card.
+/// 2. **Verified Recommended** — for an idle card we probe candidate
+///    PCM forms in preference order (`plughw:` name > `plughw:` index >
+///    `hw:` name > `hw:` index) and surface the first that actually
+///    streams without POLLERR, badged Recommended. AIOC / DigiRig still
+///    win on `plughw:CARD=<name>` exactly as before; cheap chips whose
+///    plughw path fails fall through to the raw `hw:` form that works.
+/// 3. **In-use stays visible** — a card held open by a live capture
+///    stream is never probed (would disrupt the running radio) and
+///    surfaced from `in_use` cache, so a rescan no longer loses it.
+#[cfg(target_os = "linux")]
+#[allow(deprecated)] // DeviceTrait::name() gives the raw pcm_id we need
+fn collect_input_devices_linux(
+    inputs: impl Iterator<Item = cpal::Device>,
+    in_use: &HashMap<String, (u32, u32)>,
+    host_api: &str,
+    default_input_name: Option<&str>,
+) -> Vec<AudioDeviceInfo> {
+    use crate::audio::soundcard::{
+        alsa_canonical_key, build_card_resolver, group_alsa_cards, parse_proc_asound_cards,
+        pick_input_probe_config, probe_capture,
+    };
+    use cpal::traits::DeviceTrait;
+
+    // (pcm_id, Device) for every useful ALSA capture node cpal reports.
+    let mut devs: Vec<(String, cpal::Device)> = Vec::new();
+    for dev in inputs {
+        let pcm_id = match dev.name() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        if pcm_id == "null" || !is_useful_alsa_device(&pcm_id) {
+            continue;
+        }
+        devs.push((pcm_id, dev));
+    }
+
+    let cards = std::fs::read_to_string("/proc/asound/cards")
+        .map(|c| parse_proc_asound_cards(&c))
+        .unwrap_or_default();
+    let resolver = build_card_resolver(&cards);
+    let canon = |pcm: &str| -> String {
+        alsa_canonical_key(pcm, |t| resolver.get(t).copied())
+    };
+
+    // Seed grouping with in-use pcm_ids too: once a raw hw: stream
+    // holds a card, cpal stops listing it, so it must still group.
+    let mut all_pcms: Vec<String> = devs.iter().map(|(p, _)| p.clone()).collect();
+    for pcm in in_use.keys() {
+        if !all_pcms.contains(pcm) {
+            all_pcms.push(pcm.clone());
+        }
+    }
+    let groups = group_alsa_cards(&all_pcms, |t| resolver.get(t).copied());
+
+    // canonical card key -> (in-use pcm_id, running sample_rate, channels)
+    let mut in_use_by_card: HashMap<String, (String, u32, u32)> = HashMap::new();
+    for (pcm, (sr, ch)) in in_use {
+        in_use_by_card
+            .entry(canon(pcm))
+            .or_insert_with(|| (pcm.clone(), *sr, *ch));
+    }
+
+    let find_dev = |pcm: &str| devs.iter().find(|(p, _)| p == pcm).map(|(_, d)| d);
+    let configs_for = |dev: &cpal::Device| -> (Vec<u32>, Vec<u32>) {
+        let mut sample_rates = Vec::new();
+        let mut channel_counts = Vec::new();
+        if let Ok(configs) = dev.supported_input_configs() {
+            for cfg in configs {
+                let (min_rate, max_rate) = (cfg.min_sample_rate(), cfg.max_sample_rate());
+                for &rate in audio::STANDARD_SAMPLE_RATES {
+                    if rate >= min_rate && rate <= max_rate && !sample_rates.contains(&rate) {
+                        sample_rates.push(rate);
+                    }
+                }
+                let c = cfg.channels() as u32;
+                if !channel_counts.contains(&c) {
+                    channel_counts.push(c);
+                }
+            }
+        }
+        (sample_rates, channel_counts)
+    };
+
+    let probe_timeout = std::time::Duration::from_millis(250);
+    let mut out = Vec::new();
+    for group in groups {
+        // Card held open by a live capture stream: never probe it.
+        if let Some((pcm, sr, ch)) = in_use_by_card.get(&group.key) {
+            out.push(AudioDeviceInfo {
+                name: alsa_card_description(pcm),
+                stable_id: pcm.clone(),
+                kind: AudioDeviceKind::Input.into(),
+                sample_rates: vec![*sr],
+                channel_counts: vec![*ch],
+                host_api: host_api.to_string(),
+                is_default: false,
+                description: alsa_card_description(pcm),
+                recommended: true,
+            });
+            continue;
+        }
+
+        // Idle card: first candidate that actually streams wins the
+        // Recommended badge. Falls back to the top-ranked candidate
+        // (unbadged) so a card that fails every probe still appears.
+        let mut chosen: Option<String> = None;
+        for cand in &group.candidates {
+            if let Some(dev) = find_dev(cand) {
+                if probe_capture(dev, probe_timeout) {
+                    chosen = Some(cand.clone());
+                    break;
+                }
+            }
+        }
+        let (pcm, recommended) = match chosen {
+            Some(c) => (c, true),
+            None => match group.candidates.first() {
+                Some(c) => (c.clone(), false),
+                None => continue,
+            },
+        };
+
+        let dev = find_dev(&pcm);
+        let (mut sample_rates, mut channel_counts) =
+            dev.map(&configs_for).unwrap_or_default();
+        if sample_rates.is_empty() || channel_counts.is_empty() {
+            if recommended {
+                // Streamed fine but cpal won't report ranges: fall back
+                // to the negotiated probe config so the row survives the
+                // empty-array drop below.
+                if let Some((_, cfg)) = dev.and_then(|d| pick_input_probe_config(d).ok()) {
+                    sample_rates = vec![cfg.sample_rate];
+                    channel_counts = vec![cfg.channels as u32];
+                } else {
+                    sample_rates = vec![48_000];
+                    channel_counts = vec![1];
+                }
+            } else {
+                // Never streamed and no config ranges: dead node (e.g.
+                // headless HDMI). Match prior behavior — drop it.
+                continue;
+            }
+        }
+
+        let display_name = dev
+            .and_then(|d| d.description().ok())
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|| alsa_card_description(&pcm));
+        let is_default = default_input_name == Some(display_name.as_str());
+
+        out.push(AudioDeviceInfo {
+            name: display_name,
+            stable_id: pcm.clone(),
+            kind: AudioDeviceKind::Input.into(),
+            sample_rates,
+            channel_counts,
+            host_api: host_api.to_string(),
+            is_default,
+            description: alsa_card_description(&pcm),
+            recommended,
+        });
+    }
+    out
+}
+
+/// Linux playback-device collection. Same physical-card dedup as the
+/// capture path, but **no probe** (output is not stream-tested; cheap
+/// chips don't exhibit the capture POLLERR and probing would make
+/// noise). One entry per physical card: the in-use card is surfaced
+/// from the cache snapshot (never opened — the AIOC's shared in/out PCM
+/// fails `supported_output_configs()` while RX holds it), and an idle
+/// card surfaces its top-ranked alias (`plughw:CARD=<name>` first).
+/// `recommended` stays the string heuristic for outputs.
+#[cfg(target_os = "linux")]
+#[allow(deprecated)] // DeviceTrait::name() gives the raw pcm_id we need
+fn collect_output_devices_linux(
+    outputs: impl Iterator<Item = cpal::Device>,
+    in_use: &HashMap<String, (u32, u32)>,
+    host_api: &str,
+    default_output_name: Option<&str>,
+) -> Vec<AudioDeviceInfo> {
+    use crate::audio::soundcard::{
+        alsa_canonical_key, build_card_resolver, group_alsa_cards, is_recommended_pcm_id,
+        parse_proc_asound_cards,
+    };
+    use cpal::traits::DeviceTrait;
+
+    let mut devs: Vec<(String, cpal::Device)> = Vec::new();
+    for dev in outputs {
+        let pcm_id = match dev.name() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        if pcm_id == "null" || !is_useful_alsa_device(&pcm_id) {
+            continue;
+        }
+        devs.push((pcm_id, dev));
+    }
+
+    let cards = std::fs::read_to_string("/proc/asound/cards")
+        .map(|c| parse_proc_asound_cards(&c))
+        .unwrap_or_default();
+    let resolver = build_card_resolver(&cards);
+    let canon = |pcm: &str| alsa_canonical_key(pcm, |t| resolver.get(t).copied());
+
+    let mut all_pcms: Vec<String> = devs.iter().map(|(p, _)| p.clone()).collect();
+    for pcm in in_use.keys() {
+        if !all_pcms.contains(pcm) {
+            all_pcms.push(pcm.clone());
+        }
+    }
+    let groups = group_alsa_cards(&all_pcms, |t| resolver.get(t).copied());
+
+    let mut in_use_by_card: HashMap<String, (String, u32, u32)> = HashMap::new();
+    for (pcm, (sr, ch)) in in_use {
+        in_use_by_card
+            .entry(canon(pcm))
+            .or_insert_with(|| (pcm.clone(), *sr, *ch));
+    }
+
+    let find_dev = |pcm: &str| devs.iter().find(|(p, _)| p == pcm).map(|(_, d)| d);
+    let configs_for = |dev: &cpal::Device| -> (Vec<u32>, Vec<u32>) {
+        let mut sample_rates = Vec::new();
+        let mut channel_counts = Vec::new();
+        if let Ok(configs) = dev.supported_output_configs() {
+            for cfg in configs {
+                let (min_rate, max_rate) = (cfg.min_sample_rate(), cfg.max_sample_rate());
+                for &rate in audio::STANDARD_SAMPLE_RATES {
+                    if rate >= min_rate && rate <= max_rate && !sample_rates.contains(&rate) {
+                        sample_rates.push(rate);
+                    }
+                }
+                let c = cfg.channels() as u32;
+                if !channel_counts.contains(&c) {
+                    channel_counts.push(c);
+                }
+            }
+        }
+        (sample_rates, channel_counts)
+    };
+
+    let kind: i32 = AudioDeviceKind::Output.into();
+    let mut out = Vec::new();
+    for group in groups {
+        if let Some((pcm, sr, ch)) = in_use_by_card.get(&group.key) {
+            out.push(AudioDeviceInfo {
+                name: alsa_card_description(pcm),
+                stable_id: pcm.clone(),
+                kind,
+                sample_rates: vec![*sr],
+                channel_counts: vec![*ch],
+                host_api: host_api.to_string(),
+                is_default: false,
+                description: alsa_card_description(pcm),
+                recommended: is_recommended_pcm_id(pcm),
+            });
+            continue;
+        }
+
+        // Idle card: no probing for outputs — take the top-ranked
+        // alias (plughw:<name> first). Drop a card with no usable
+        // config ranges (matches prior behavior for dead nodes).
+        let pcm = match group.candidates.first() {
+            Some(c) => c.clone(),
+            None => continue,
+        };
+        let dev = find_dev(&pcm);
+        let (sample_rates, channel_counts) = dev.map(&configs_for).unwrap_or_default();
+        if sample_rates.is_empty() || channel_counts.is_empty() {
+            continue;
+        }
+        let display_name = dev
+            .and_then(|d| d.description().ok())
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|| alsa_card_description(&pcm));
+        let is_default = default_output_name == Some(display_name.as_str());
+
+        out.push(AudioDeviceInfo {
+            name: display_name,
+            stable_id: pcm.clone(),
+            kind,
+            sample_rates,
+            channel_counts,
+            host_api: host_api.to_string(),
+            is_default,
+            description: alsa_card_description(&pcm),
+            recommended: is_recommended_pcm_id(&pcm),
+        });
+    }
+    out
+}
+
+/// `in_use_input` / `in_use_output` map each pcm_id currently held open
+/// by a live capture / playback stream to its running `(sample_rate,
+/// channels)`. Linux uses them to surface in-use cards from cache
+/// instead of probing (input) or instead of letting a busy-device
+/// `supported_*_configs()` failure drop them (output); other platforms
+/// ignore them.
 #[allow(deprecated)]
-fn enumerate_audio_devices(include_output: bool) -> Vec<AudioDeviceInfo> {
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn enumerate_audio_devices(
+    include_output: bool,
+    in_use_input: &HashMap<String, (u32, u32)>,
+    in_use_output: &HashMap<String, (u32, u32)>,
+) -> Vec<AudioDeviceInfo> {
     use cpal::traits::{DeviceTrait, HostTrait};
 
     let host = cpal::default_host();
@@ -1493,47 +1865,154 @@ fn enumerate_audio_devices(include_output: bool) -> Vec<AudioDeviceInfo> {
     let mut devices = Vec::new();
 
     if let Ok(inputs) = host.input_devices() {
-        devices.extend(collect_devices(
-            inputs,
-            AudioDeviceKind::Input.into(),
-            default_input_name.as_deref(),
-            &host_name,
-            |d| d.supported_input_configs(),
-        ));
+        #[cfg(target_os = "linux")]
+        {
+            devices.extend(collect_input_devices_linux(
+                inputs,
+                in_use_input,
+                &host_name,
+                default_input_name.as_deref(),
+            ));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            devices.extend(collect_devices(
+                inputs,
+                AudioDeviceKind::Input.into(),
+                default_input_name.as_deref(),
+                &host_name,
+                |d| d.supported_input_configs(),
+            ));
+        }
     }
 
     if include_output {
         if let Ok(outputs) = host.output_devices() {
-            devices.extend(collect_devices(
-                outputs,
-                AudioDeviceKind::Output.into(),
-                default_output_name.as_deref(),
-                &host_name,
-                |d| d.supported_output_configs(),
-            ));
+            #[cfg(target_os = "linux")]
+            {
+                devices.extend(collect_output_devices_linux(
+                    outputs,
+                    in_use_output,
+                    &host_name,
+                    default_output_name.as_deref(),
+                ));
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                devices.extend(collect_devices(
+                    outputs,
+                    AudioDeviceKind::Output.into(),
+                    default_output_name.as_deref(),
+                    &host_name,
+                    |d| d.supported_output_configs(),
+                ));
+            }
         }
     }
 
     devices
 }
 
-/// Briefly open each available input device and measure peak level.
+/// Open one input device, capture for `duration`, return its peak level.
+/// Errors (busy device, bad config, unsupported format) come back inside
+/// the `error` field rather than as a panic — the scanner reports them.
 #[allow(deprecated)] // DeviceTrait::name() returns the raw pcm_id we need
-fn scan_input_levels(duration_ms: u32) -> Vec<InputDeviceLevel> {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+fn measure_input_level(
+    dev: &cpal::Device,
+    pcm_id: &str,
+    duration: std::time::Duration,
+) -> InputDeviceLevel {
+    use cpal::traits::{DeviceTrait, StreamTrait};
     use cpal::SampleFormat;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+
+    let err = |e: String| InputDeviceLevel {
+        name: pcm_id.to_string(),
+        peak_dbfs: NOISE_FLOOR_DBFS,
+        has_signal: false,
+        error: e,
+    };
+
+    // Negotiate the probe config the same way device detection does —
+    // shared so the scanner and the detector can't drift apart.
+    // default_input_config() is avoided: it can return parameters a raw
+    // hw: ALSA device rejects with EINVAL.
+    let (sample_format, stream_cfg) = match audio::soundcard::pick_input_probe_config(dev) {
+        Ok(v) => v,
+        Err(e) => return err(e),
+    };
+
+    let peak = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let stream = match sample_format {
+        SampleFormat::F32 => {
+            let pw = peak.clone();
+            dev.build_input_stream(&stream_cfg,
+                move |data: &[f32], _| update_peak_f32(&pw, data),
+                |e| eprintln!("scan level error: {}", e), None)
+        }
+        SampleFormat::I16 => {
+            let pw = peak.clone();
+            dev.build_input_stream(&stream_cfg,
+                move |data: &[i16], _| update_peak_i16(&pw, data),
+                |e| eprintln!("scan level error: {}", e), None)
+        }
+        SampleFormat::U16 => {
+            let pw = peak.clone();
+            dev.build_input_stream(&stream_cfg,
+                move |data: &[u16], _| update_peak_u16(&pw, data),
+                |e| eprintln!("scan level error: {}", e), None)
+        }
+        other => return err(format!("unsupported format: {:?}", other)),
+    };
+
+    match stream {
+        Ok(s) => {
+            if s.play().is_ok() {
+                std::thread::sleep(duration);
+            }
+            drop(s);
+            let peak_lin = f32::from_bits(peak.load(Ordering::Relaxed));
+            let peak_db = if peak_lin > 0.0 {
+                20.0 * peak_lin.log10()
+            } else {
+                NOISE_FLOOR_DBFS
+            };
+            InputDeviceLevel {
+                name: pcm_id.to_string(),
+                peak_dbfs: peak_db,
+                has_signal: peak_db > SIGNAL_THRESHOLD_DBFS,
+                error: String::new(),
+            }
+        }
+        Err(e) => err(format!("{}", e)),
+    }
+}
+
+/// Measure peak input level on each capture device.
+///
+/// `in_use` lists pcm_ids held open by a running channel. On Linux the
+/// list is collapsed to one row per physical card (same canonicalization
+/// as device detection), and an in-use card reports a clear "busy"
+/// status instead of cpal's misleading "device no longer available" —
+/// you cannot independently scan a device a running channel holds; its
+/// live level shows on the device card.
+#[allow(deprecated)] // DeviceTrait::name() returns the raw pcm_id we need
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn scan_input_levels(
+    duration_ms: u32,
+    in_use: &HashMap<String, (u32, u32)>,
+) -> Vec<InputDeviceLevel> {
+    use cpal::traits::{DeviceTrait, HostTrait};
 
     let host = cpal::default_host();
     let inputs = match host.input_devices() {
         Ok(i) => i.collect::<Vec<_>>(),
         Err(_) => return Vec::new(),
     };
-
     let duration = std::time::Duration::from_millis(duration_ms as u64);
-    let mut results = Vec::new();
 
+    let mut devs: Vec<(String, cpal::Device)> = Vec::new();
     for dev in inputs {
         let pcm_id = match dev.name() {
             Ok(id) => id,
@@ -1541,130 +2020,74 @@ fn scan_input_levels(duration_ms: u32) -> Vec<InputDeviceLevel> {
         };
         // Skip virtual/plugin ALSA devices that can poison the ALSA
         // backend when their PCM open fails.
-        if !is_useful_alsa_device(&pcm_id) {
+        if pcm_id == "null" || !is_useful_alsa_device(&pcm_id) {
             continue;
         }
-        // Pick the best supported config by querying the device's actual
-        // capabilities.  default_input_config() can return parameters the
-        // hardware rejects (especially on raw hw: ALSA devices), causing
-        // snd_pcm_hw_params to fail with EINVAL.
-        let (sample_format, stream_cfg) = match dev.supported_input_configs() {
-            Ok(configs) => {
-                // Prefer mono > stereo, I16 > F32 > U16 (I16 is native
-                // for most USB audio interfaces).
-                let mut best: Option<cpal::SupportedStreamConfigRange> = None;
-                for cfg in configs {
-                    let dominated_by_best = best.as_ref().is_some_and(|b| {
-                        if cfg.channels() > b.channels() { return true; }
-                        if cfg.channels() < b.channels() { return false; }
-                        let format_rank = |f: SampleFormat| match f {
-                            SampleFormat::I16 => 0,
-                            SampleFormat::F32 => 1,
-                            _ => 2,
-                        };
-                        format_rank(cfg.sample_format()) >= format_rank(b.sample_format())
-                    });
-                    if !dominated_by_best { best = Some(cfg); }
-                }
-                match best {
-                    Some(range) => {
-                        let rate = audio::PREFERRED_SCAN_RATES
-                            .iter()
-                            .copied()
-                            .find(|&r| r >= range.min_sample_rate() && r <= range.max_sample_rate())
-                            .unwrap_or(range.max_sample_rate());
-                        let fmt = range.sample_format();
-                        let cfg = cpal::StreamConfig {
-                            channels: range.channels(),
-                            sample_rate: rate,
-                            buffer_size: cpal::BufferSize::Default,
-                        };
-                        (fmt, cfg)
-                    }
-                    None => {
-                        results.push(InputDeviceLevel {
-                            name: pcm_id,
-                            peak_dbfs: NOISE_FLOOR_DBFS,
-                            has_signal: false,
-                            error: "no supported input configurations".into(),
-                        });
-                        continue;
-                    }
-                }
+        devs.push((pcm_id, dev));
+    }
+
+    let mut results: Vec<InputDeviceLevel> = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        use crate::audio::soundcard::{
+            alsa_canonical_key, build_card_resolver, group_alsa_cards, parse_proc_asound_cards,
+        };
+        let cards = std::fs::read_to_string("/proc/asound/cards")
+            .map(|c| parse_proc_asound_cards(&c))
+            .unwrap_or_default();
+        let resolver = build_card_resolver(&cards);
+        let canon = |pcm: &str| alsa_canonical_key(pcm, |t| resolver.get(t).copied());
+
+        let mut all_pcms: Vec<String> = devs.iter().map(|(p, _)| p.clone()).collect();
+        for pcm in in_use.keys() {
+            if !all_pcms.contains(pcm) {
+                all_pcms.push(pcm.clone());
             }
-            Err(e) => {
+        }
+        let groups = group_alsa_cards(&all_pcms, |t| resolver.get(t).copied());
+
+        // canonical card key -> the in-use pcm_id on that card
+        let mut in_use_by_card: HashMap<String, String> = HashMap::new();
+        for pcm in in_use.keys() {
+            in_use_by_card.entry(canon(pcm)).or_insert_with(|| pcm.clone());
+        }
+        let find_dev = |pcm: &str| devs.iter().find(|(p, _)| p == pcm).map(|(_, d)| d);
+
+        for group in groups {
+            if let Some(pcm) = in_use_by_card.get(&group.key) {
                 results.push(InputDeviceLevel {
-                    name: pcm_id,
+                    name: pcm.clone(),
                     peak_dbfs: NOISE_FLOOR_DBFS,
                     has_signal: false,
-                    error: format!("{}", e),
+                    error: "in use by a running channel — live level is shown on the device card"
+                        .to_string(),
                 });
                 continue;
             }
-        };
-
-        let peak = Arc::new(AtomicU32::new(0f32.to_bits()));
-
-        // Build stream using the device's native sample format.
-        let stream = match sample_format {
-            SampleFormat::F32 => {
-                let pw = peak.clone();
-                dev.build_input_stream(&stream_cfg,
-                    move |data: &[f32], _| update_peak_f32(&pw, data),
-                    |e| eprintln!("scan level error: {}", e), None)
-            }
-            SampleFormat::I16 => {
-                let pw = peak.clone();
-                dev.build_input_stream(&stream_cfg,
-                    move |data: &[i16], _| update_peak_i16(&pw, data),
-                    |e| eprintln!("scan level error: {}", e), None)
-            }
-            SampleFormat::U16 => {
-                let pw = peak.clone();
-                dev.build_input_stream(&stream_cfg,
-                    move |data: &[u16], _| update_peak_u16(&pw, data),
-                    |e| eprintln!("scan level error: {}", e), None)
-            }
-            _ => {
-                results.push(InputDeviceLevel {
-                    name: pcm_id,
-                    peak_dbfs: NOISE_FLOOR_DBFS,
-                    has_signal: false,
-                    error: format!("unsupported format: {:?}", sample_format),
-                });
-                continue;
-            }
-        };
-
-        match stream {
-            Ok(s) => {
-                if s.play().is_ok() {
-                    std::thread::sleep(duration);
+            // Idle card: measure its top-ranked alias once (one row per
+            // physical card, not per hw:/plughw: alias).
+            let mut chosen: Option<String> = None;
+            for cand in &group.candidates {
+                if find_dev(cand).is_some() {
+                    chosen = Some(cand.clone());
+                    break;
                 }
-                drop(s);
-
-                let peak_lin = f32::from_bits(peak.load(Ordering::Relaxed));
-                let peak_db = if peak_lin > 0.0 {
-                    20.0 * peak_lin.log10()
-                } else {
-                    NOISE_FLOOR_DBFS
-                };
-
-                results.push(InputDeviceLevel {
-                    name: pcm_id,
-                    peak_dbfs: peak_db,
-                    has_signal: peak_db > SIGNAL_THRESHOLD_DBFS,
-                    error: String::new(),
-                });
             }
-            Err(e) => {
-                results.push(InputDeviceLevel {
-                    name: pcm_id,
-                    peak_dbfs: NOISE_FLOOR_DBFS,
-                    has_signal: false,
-                    error: format!("{}", e),
-                });
+            let pcm = match chosen {
+                Some(c) => c,
+                None => continue,
+            };
+            if let Some(dev) = find_dev(&pcm) {
+                results.push(measure_input_level(dev, &pcm, duration));
             }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        for (pcm_id, dev) in &devs {
+            results.push(measure_input_level(dev, pcm_id, duration));
         }
     }
 
