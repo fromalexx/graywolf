@@ -197,6 +197,7 @@ var schemaMigrations = []migration{
 	{version: 18, name: "actions_uppercase_names", phase: postAutoMigrate, run: migrateActionsUppercaseNames},
 	{version: 19, name: "actions_max_reply_lines", phase: postAutoMigrate, run: migrateActionsMaxReplyLines},
 	{version: 20, name: "kiss_tcp_client_tx_default", phase: postAutoMigrate, run: migrateKissTcpClientTxDefault},
+	{version: 21, name: "audio_devices_clamp_sample_rate", phase: postAutoMigrate, run: migrateClampAudioSampleRate},
 }
 
 // runMigrations applies every pending migration in the given phase,

@@ -16,10 +16,21 @@ pub mod flac;
 pub mod soundcard;
 pub mod stdin_raw;
 
+/// The highest sample rate the modem will ever operate a stream at.
+///
+/// Every Graywolf modem mode (AFSK 1200, G3RUH 9600, QPSK/8-PSK) is well
+/// served by 48 kHz; nothing needs hi-fi rates. We deliberately never
+/// advertise, default to, or open a stream above this. Rates above 48 kHz
+/// are a trap on USB audio: an ALSA `plughw:`/`default` PCM advertises a
+/// synthetic resample range (up to 192 kHz) even though the hardware codec
+/// runs at 48 kHz, and a stream opened at the inflated rate desyncs the
+/// demodulator's bit timing — every frame fails FCS, RX goes silent.
+pub const MODEM_MAX_SAMPLE_RATE: u32 = 48_000;
+
 /// Sample rates we advertise when enumerating device capabilities. Covers
-/// common amateur-radio rates (8–48 kHz) plus the 96 kHz hi-fi rate that
-/// some USB devices support.
-pub const STANDARD_SAMPLE_RATES: &[u32] = &[8000, 11025, 16000, 22050, 44100, 48000, 96000];
+/// the common amateur-radio rates. Capped at [`MODEM_MAX_SAMPLE_RATE`] —
+/// see that constant for why we never go above 48 kHz.
+pub const STANDARD_SAMPLE_RATES: &[u32] = &[8000, 11025, 16000, 22050, 44100, 48000];
 
 /// Preferred sample rates for quick level scans, in priority order.
 /// 48 kHz is native for most USB audio; 44.1 kHz is the CD-standard fallback.
@@ -63,3 +74,26 @@ impl AudioSource {
 pub const CHUNK_QUEUE_DEPTH: usize = 64;
 
 pub type SampleSink = SyncSender<AudioChunk>;
+
+#[cfg(test)]
+mod rate_invariants {
+    use super::*;
+
+    #[test]
+    fn standard_rates_never_exceed_modem_ceiling() {
+        for &r in STANDARD_SAMPLE_RATES {
+            assert!(
+                r <= MODEM_MAX_SAMPLE_RATE,
+                "advertised rate {r} exceeds modem ceiling {MODEM_MAX_SAMPLE_RATE}; \
+                 rates above 48 kHz desync the demod on USB plughw devices"
+            );
+        }
+    }
+
+    #[test]
+    fn scan_rates_never_exceed_modem_ceiling() {
+        for &r in PREFERRED_SCAN_RATES {
+            assert!(r <= MODEM_MAX_SAMPLE_RATE, "scan rate {r} exceeds ceiling");
+        }
+    }
+}

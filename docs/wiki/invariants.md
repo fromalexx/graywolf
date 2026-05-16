@@ -466,3 +466,70 @@ docs), [`../../pkg/aprs/fap_corpus_test.go`](../../pkg/aprs/fap_corpus_test.go),
 (`convertWeather`),
 [`../../pkg/historydb/historydb.go`](../../pkg/historydb/historydb.go)
 (`bootstrap` `user_version` backfill).
+### 32. Modem sample rate is capped at 48 kHz
+
+The modem never advertises, defaults to, or opens an audio stream
+above **48 kHz** (`audio::MODEM_MAX_SAMPLE_RATE`). Every Graywolf
+modem mode (AFSK 1200, G3RUH 9600, QPSK/8-PSK) is well served by
+48 kHz.
+
+*Why:* An ALSA `plughw:`/`default` PCM advertises a *synthetic*
+resample range (up to 192 kHz) via cpal `supported_*_configs()`
+even though the USB codec hardware runs at 48 kHz. The Audio
+Devices form used to auto-fill the **highest** advertised rate, so
+operators who ran "Detect Devices" persisted `sample_rate=96000`.
+At runtime the modem opened the stream at the inflated rate while
+the hardware ran 48 kHz; the demodulator clocked AFSK bit timing
+against the wrong rate and **every frame failed FCS -- RX went
+silent with no error** (anguilla.local, 2026-05-16). Defense in
+depth, all three layers required:
+
+1. **Enumeration** never lists >48 kHz: `STANDARD_SAMPLE_RATES`
+   stops at 48000, asserted by `audio::rate_invariants`.
+2. **UI** never defaults to a corrupt/max rate:
+   `pickDefaultSampleRate` prefers 48000 → 44100 → highest ≤48 kHz,
+   never above; the manual rate `<Select>` offers no 96000.
+3. **Runtime backstop**: `soundcard::choose_stream_rate` honors the
+   requested rate only when ≤48 kHz *and* covered by a real
+   supported range, else falls back to the device native rate
+   clamped to the ceiling. `AudioSource.sample_rate` reports the
+   rate **actually opened**, so the demod can never be silently
+   desynced by a bad config again.
+
+Migration 21 (`audio_devices_clamp_sample_rate`) repairs
+already-corrupted field databases (`sample_rate > 48000 → 48000`).
+
+Source:
+[`../../graywolf-modem/src/audio/mod.rs`](../../graywolf-modem/src/audio/mod.rs)
+(`MODEM_MAX_SAMPLE_RATE`, `STANDARD_SAMPLE_RATES`),
+[`../../graywolf-modem/src/audio/soundcard.rs`](../../graywolf-modem/src/audio/soundcard.rs)
+(`choose_stream_rate`, `spawn`),
+[`../../web/src/lib/sampleRate.js`](../../web/src/lib/sampleRate.js),
+[`../../pkg/configstore/migrate_audio_devices_clamp_sample_rate.go`](../../pkg/configstore/migrate_audio_devices_clamp_sample_rate.go).
+
+### 33. Capture stream format is device-advertised, never `default_input_config()`
+
+`soundcard::spawn` picks the input `SampleFormat` from the device's
+*advertised* supported configs at the chosen rate, preferring native
+`I16` (`pick_input_sample_format`). It must **never** open a capture
+stream using `device.default_input_config().sample_format()`.
+
+*Why:* On an ALSA `plughw:`/`default` PCM, cpal's
+`default_input_config()` returns **`F32`**. Opening an `F32` capture
+stream on a full-speed USB radio codec (AIOC and similar) makes cpal
+`alsa::poll()` return `POLLERR` on essentially every period -- the
+holding thread rebuilds, POLLERRs again, and loops forever (observed:
+24,344 errors in one session, RX stuck at zero with no fatal error).
+The *same hardware* streams the native `I16` config cleanly (`arecord
+-f S16_LE` and the detection probe both work). The detection probe
+(`pick_input_probe_config`) already selected I16; the runtime
+`spawn()` did not, so the probe verified a config the runtime never
+used. `pick_input_sample_format` and the probe now share
+`input_format_rank` so detection and runtime cannot drift. The
+sample-*rate* clamp (invariant 32) is necessary but independent: a
+clipping analog input or an `F32` plughw stream each kill RX on their
+own.
+
+Source:
+[`../../graywolf-modem/src/audio/soundcard.rs`](../../graywolf-modem/src/audio/soundcard.rs)
+(`pick_input_sample_format`, `input_format_rank`, `pick_input_probe_config`, `spawn`).

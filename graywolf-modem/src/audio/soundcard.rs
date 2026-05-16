@@ -173,14 +173,35 @@ pub fn spawn(
         .default_input_config()
         .map_err(|e| format!("device default config: {}", e))?;
 
+    // Safety net for corrupt persisted config: clamp the requested rate
+    // to one the device actually supports and the modem can decode (never
+    // above MODEM_MAX_SAMPLE_RATE). A stale `sample_rate=96000` from a
+    // plughw device that really runs 48 kHz is rejected here instead of
+    // silently desyncing the demod's bit timing.
+    let supported_ranges: Vec<(u32, u32)> = device
+        .supported_input_configs()
+        .map(|it| it.map(|c| (c.min_sample_rate(), c.max_sample_rate())).collect())
+        .unwrap_or_default();
+    let stream_rate = choose_stream_rate(
+        cfg.sample_rate,
+        supported.sample_rate(),
+        &supported_ranges,
+    );
+    if stream_rate != cfg.sample_rate {
+        eprintln!(
+            "graywolf-modem: input rate {} Hz unsupported/corrupt; opening at {} Hz instead",
+            cfg.sample_rate, stream_rate
+        );
+    }
+
     let channels = negotiate_channels(
-        &device, cfg.sample_rate, cfg.channels.max(1) as u16, "input",
+        &device, stream_rate, cfg.channels.max(1) as u16, "input",
         |d| d.supported_input_configs(),
     )?;
 
     let stream_config = StreamConfig {
         channels,
-        sample_rate: cfg.sample_rate,
+        sample_rate: stream_rate,
         buffer_size: cpal::BufferSize::Default,
     };
 
@@ -197,7 +218,35 @@ pub fn spawn(
     // own thread that also runs a small park loop to keep it alive.
     let stop_for_thread = stop.clone();
     let stream_failed_for_thread = stream_failed.clone();
-    let sample_format = supported.sample_format();
+    // Never trust default_input_config()'s format: on an ALSA plughw:/
+    // default PCM it is F32, which POLLERR-loops cpal forever on cheap
+    // USB radio codecs (AIOC). Pick the format the device actually
+    // advertises at our rate, preferring native I16 (what arecord and
+    // the detection probe use and what streams reliably). Fall back to
+    // the cpal default only if the device advertises nothing usable.
+    let input_cfgs: Vec<(u16, SampleFormat, u32, u32)> = device
+        .supported_input_configs()
+        .map(|it| {
+            it.map(|c| {
+                (
+                    c.channels(),
+                    c.sample_format(),
+                    c.min_sample_rate(),
+                    c.max_sample_rate(),
+                )
+            })
+            .collect()
+        })
+        .unwrap_or_default();
+    // Format and channels are chosen independently (rate-filtered): a
+    // converting `plughw:`/`default` PCM accepts any (channels, format)
+    // pair via software conversion, which is the only realistic graywolf
+    // capture path. A non-converting raw `hw:` device that advertised
+    // format and channels only as disjoint configs would reject the
+    // combination, but cpal surfaces that as a build error via ready_tx
+    // (loud, non-fatal) rather than a silent failure.
+    let sample_format = pick_input_sample_format(&input_cfgs, stream_rate)
+        .unwrap_or_else(|| supported.sample_format());
     let (ready_tx, ready_rx) = channel::<Result<(), String>>();
 
     let join = thread::Builder::new()
@@ -326,7 +375,9 @@ pub fn spawn(
         .map_err(|e| format!("cpal {}", e))?;
 
     Ok(AudioSource {
-        sample_rate: cfg.sample_rate,
+        // Report the rate actually opened, not the requested one, so the
+        // demodulator clocks bit timing against real audio.
+        sample_rate: stream_rate,
         thread: Some(join),
         stop,
     })
@@ -592,12 +643,7 @@ pub fn pick_input_probe_config(dev: &Device) -> Result<(SampleFormat, StreamConf
             if cfg.channels() < b.channels() {
                 return false;
             }
-            let rank = |f: SampleFormat| match f {
-                SampleFormat::I16 => 0,
-                SampleFormat::F32 => 1,
-                _ => 2,
-            };
-            rank(cfg.sample_format()) >= rank(b.sample_format())
+            input_format_rank(cfg.sample_format()) >= input_format_rank(b.sample_format())
         });
         if !dominated_by_best {
             best = Some(cfg);
@@ -617,6 +663,67 @@ pub fn pick_input_probe_config(dev: &Device) -> Result<(SampleFormat, StreamConf
             buffer_size: cpal::BufferSize::Default,
         },
     ))
+}
+
+/// Rank for input sample-format preference: lower is better. Native
+/// integer `I16` first (every cheap USB radio codec runs it and ALSA
+/// `plughw:` streams it without resampling jitter), then `F32`, then
+/// the rest. Single source of truth shared by the runtime stream and
+/// the detection probe.
+fn input_format_rank(f: SampleFormat) -> u8 {
+    match f {
+        SampleFormat::I16 => 0,
+        SampleFormat::F32 => 1,
+        _ => 2,
+    }
+}
+
+/// Pick the sample format to actually open a capture stream with, given
+/// the device's supported `(channels, format, min_rate, max_rate)`
+/// configs and the rate we will open at.
+///
+/// `default_input_config()` on an ALSA `plughw:`/`default` PCM hands back
+/// `F32`; cpal opening that synthetic config on a full-speed USB gadget
+/// POLLERR-loops forever and RX dies, even though the same hardware
+/// streams `I16` (native) cleanly -- proven on the AIOC. We therefore
+/// never trust `default_input_config()` for the format; we pick the
+/// best format the device actually advertises *at the chosen rate*,
+/// preferring native `I16`, exactly as the detection probe does.
+pub fn pick_input_sample_format(
+    configs: &[(u16, SampleFormat, u32, u32)],
+    rate: u32,
+) -> Option<SampleFormat> {
+    configs
+        .iter()
+        .filter(|&&(_ch, _f, min, max)| rate >= min && rate <= max)
+        .min_by_key(|&&(_ch, f, _min, _max)| input_format_rank(f))
+        .map(|&(_ch, f, _min, _max)| f)
+}
+
+/// Decide the sample rate to actually open a stream at, given the
+/// operator-configured `requested` rate, the device's `native` rate
+/// (cpal `default_*_config().sample_rate()`), and the device's advertised
+/// `supported` (min,max) ranges.
+///
+/// This is the safety net for corrupt persisted config: an ALSA
+/// `plughw:`/`default` PCM advertises a synthetic resample range up to
+/// 192 kHz even though the codec runs at 48 kHz, so a stale
+/// `sample_rate=96000` in the DB would otherwise open a stream the demod
+/// then clocks at the wrong rate (every frame fails FCS, RX dies). We
+/// never open above [`super::MODEM_MAX_SAMPLE_RATE`], honor `requested`
+/// only when it is sane and actually covered by a supported range, and
+/// otherwise fall back to the device's native rate clamped to the ceiling.
+pub fn choose_stream_rate(requested: u32, native: u32, supported: &[(u32, u32)]) -> u32 {
+    let ceiling = super::MODEM_MAX_SAMPLE_RATE;
+    let in_range = |r: u32| supported.iter().any(|&(lo, hi)| r >= lo && r <= hi);
+
+    if requested != 0 && requested <= ceiling && in_range(requested) {
+        return requested;
+    }
+    if native != 0 && native <= ceiling {
+        return native;
+    }
+    ceiling
 }
 
 /// Briefly open `dev` for capture and report whether it actually streams.
@@ -1143,6 +1250,69 @@ fn fill_output_u16(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pick_input_format_prefers_i16_over_f32_at_rate() {
+        // The real AIOC case: a synthetic plug PCM advertises F32 (and
+        // a huge range) alongside the native I16/48k config. Must pick
+        // I16 -- F32 here is what POLLERR-loops cpal.
+        let cfgs = [
+            (2u16, SampleFormat::F32, 4_000u32, 4_294_967_295u32),
+            (1u16, SampleFormat::I16, 48_000u32, 48_000u32),
+        ];
+        assert_eq!(pick_input_sample_format(&cfgs, 48_000), Some(SampleFormat::I16));
+    }
+
+    #[test]
+    fn pick_input_format_uses_f32_when_no_i16_at_rate() {
+        let cfgs = [(1u16, SampleFormat::F32, 8_000u32, 48_000u32)];
+        assert_eq!(pick_input_sample_format(&cfgs, 48_000), Some(SampleFormat::F32));
+        // F32 ranked above non-I16/F32 formats.
+        let cfgs2 = [
+            (1u16, SampleFormat::U16, 8_000u32, 48_000u32),
+            (1u16, SampleFormat::F32, 8_000u32, 48_000u32),
+        ];
+        assert_eq!(pick_input_sample_format(&cfgs2, 48_000), Some(SampleFormat::F32));
+    }
+
+    #[test]
+    fn pick_input_format_respects_rate_bounds() {
+        // I16 exists but only outside the target rate; F32 covers it.
+        let cfgs = [
+            (1u16, SampleFormat::I16, 8_000u32, 16_000u32),
+            (1u16, SampleFormat::F32, 8_000u32, 48_000u32),
+        ];
+        assert_eq!(pick_input_sample_format(&cfgs, 48_000), Some(SampleFormat::F32));
+        // Nothing covers the rate.
+        assert_eq!(pick_input_sample_format(&cfgs, 96_000), None);
+        assert_eq!(pick_input_sample_format(&[], 48_000), None);
+    }
+
+    #[test]
+    fn choose_stream_rate_honors_sane_supported_request() {
+        // 48 kHz, in range, at/under ceiling → use it as-is.
+        assert_eq!(choose_stream_rate(48_000, 48_000, &[(8_000, 48_000)]), 48_000);
+        assert_eq!(choose_stream_rate(44_100, 48_000, &[(8_000, 48_000)]), 44_100);
+    }
+
+    #[test]
+    fn choose_stream_rate_rejects_request_above_ceiling() {
+        // Corrupt 96 kHz from a plughw device whose synthetic range
+        // covers it — must NOT be honored; fall back to native 48 kHz.
+        assert_eq!(choose_stream_rate(96_000, 48_000, &[(8_000, 192_000)]), 48_000);
+        // 88.2 kHz "supported" by the plug plugin — still rejected.
+        assert_eq!(choose_stream_rate(88_200, 44_100, &[(8_000, 192_000)]), 44_100);
+    }
+
+    #[test]
+    fn choose_stream_rate_clamps_bad_native_and_unset_request() {
+        // plughw default itself lies (native=96k) → clamp to ceiling.
+        assert_eq!(choose_stream_rate(96_000, 96_000, &[(8_000, 192_000)]), 48_000);
+        // requested unset (0) → device native.
+        assert_eq!(choose_stream_rate(0, 48_000, &[(8_000, 48_000)]), 48_000);
+        // requested not covered by any supported range → native.
+        assert_eq!(choose_stream_rate(44_100, 48_000, &[(48_000, 48_000)]), 48_000);
+    }
 
     /// Helper: turn a slice of mono samples into the `next()` closure the
     /// `fill_output_*` functions expect.
