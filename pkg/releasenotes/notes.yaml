@@ -11,7 +11,7 @@
   date: "2026-05-16"
   style: info
   schema_version: 1
-  title: "KISS TNC client can now transmit"
+  title: "KISS TNC transmit, channel stats, and cleaner audio detection"
   link: "#/kiss"
   body: |
     When Graywolf connects out to a KISS TNC, that connection can now
@@ -22,6 +22,20 @@
     If you have a TNC client that you deliberately want to keep
     receive-only, or one sharing a channel with a sound-card modem,
     it is left as-is. Nothing else to reconfigure.
+
+    KISS TNC channels now report their own receive and transmit
+    counts, so each channel card shows that channel's traffic at a
+    glance instead of a shared total.
+
+    Audio device detection is tidier. The same sound card no longer
+    shows up several times in the device lists, devices already in use
+    by something else are clearly marked, and a device you have
+    configured for output stays visible while detection is running.
+
+    Setting up the first user with a very long password, such as a
+    password manager's 100-character default, now shows a clear error
+    right away instead of a confusing generic failure. Passwords are
+    limited to 72 bytes.
 
 - version: "0.13.4"
   date: "2026-05-09"
