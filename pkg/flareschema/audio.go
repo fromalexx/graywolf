@@ -28,12 +28,17 @@ type AudioHost struct {
 // "output". IsDefault marks the host's default-input / default-output
 // pick (each direction has its own default).
 //
-// Recommended mirrors the flag graywolf-modem's web UI uses on the
-// user-facing device picker — set when the device's PCM identifier is
-// a stable `plughw:CARD=<name>` form (i.e. the card has a kernel-stable
-// name rather than a numeric index that can change across reboots).
-// The operator UI surfaces this as the "Recommended" label so the
-// triage view matches what the user saw when picking a device.
+// Recommended is the flare-side string heuristic only: set when the
+// device's PCM identifier is a stable `plughw:CARD=<name>` form.
+//
+// For capture devices this intentionally does NOT match the live web
+// picker. The runtime picker probes each device and
+// recommends the PCM form that actually streams (cheap USB chips fail
+// on plughw: and only work via raw hw:). `--list-audio` runs as a
+// separate short-lived process and cannot probe safely, so its
+// Recommended stays a cheap triage hint; the live picker is
+// authoritative. Keep in sync with the doc on graywolf-modem
+// is_recommended_pcm_id and the convergence-test note.
 type AudioDevice struct {
 	Name             string                   `json:"name"`
 	Direction        string                   `json:"direction"`

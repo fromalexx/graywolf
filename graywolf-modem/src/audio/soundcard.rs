@@ -5,6 +5,7 @@
 //! `AudioSource` (input) or `AudioSink` (output) keeps the stream alive;
 //! dropping it releases the device.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -381,11 +382,23 @@ pub struct SoundcardOutputConfig {
     pub audio_channel: u32,
 }
 
-/// True for cpal pcm_ids that should carry the "Recommended" badge in
-/// any user-facing surface (the runtime audio-device picker, the flare
-/// `--list-audio` enumeration). Source of truth for both call sites:
-/// see modem/mod.rs (live device-info builder) and listing::collect_devices
-/// (the `--list-audio` JSON emitter).
+/// String-only heuristic for the "Recommended" badge.
+///
+/// **Scope:** this is the *flare* heuristic only — used by
+/// the `--list-audio` JSON emitter (`listing::collect_devices`) and the
+/// Linux *output* path in `modem/mod.rs::collect_devices`. The runtime
+/// *input/capture* picker no longer uses it: `collect_input_devices_linux`
+/// verifies Recommended by actually probing the device
+/// (`probe_capture`), because this heuristic recommends the
+/// `plughw:CARD=<name>` form even on cheap USB chips where that PCM
+/// fails to stream while only the raw `hw:` form works.
+///
+/// The split is deliberate. `--list-audio` runs as a separate
+/// short-lived process with no knowledge of what a running modem holds
+/// open, so it cannot probe safely; its `recommended` stays a cheap
+/// hint and the live picker is authoritative. Keep this in sync with
+/// the doc in `pkg/flareschema/audio.go` and the note in
+/// `pkg/flareschema/convergence_test.go`.
 ///
 /// The heuristic is "device targets a stable card name": ALSA's
 /// `plughw:CARD=<name>` form, where `<name>` starts with an alphabetic
@@ -403,6 +416,288 @@ pub fn is_recommended_pcm_id(pcm_id: &str) -> bool {
     } else {
         false
     }
+}
+
+// ---------------------------------------------------------------------------
+// ALSA physical-card canonicalization.
+//
+// cpal's ALSA backend reports the same physical card under several pcm_ids:
+// numeric (`hw:CARD=1`, `plughw:CARD=1`) and symbolic (`hw:CARD=Device`,
+// `plughw:CARD=Device`). Showing all of them produces a redundant picker and
+// hides which form actually streams. These helpers collapse the aliases to
+// one physical card so the runtime picker can probe candidates in order and
+// surface a single, verified-working entry. All pure + platform-independent
+// (Linux is the only caller, but the logic is unit-tested everywhere).
+// ---------------------------------------------------------------------------
+
+/// Parse Linux `/proc/asound/cards` into `(card_index, card_name)` rows.
+///
+/// The file lists one card per stanza, e.g.
+///
+/// ```text
+///  1 [Device         ]: USB-Audio - USB Audio Device
+///                       GeneralPlus USB Audio Device at usb-...
+/// ```
+///
+/// Only the header line (leading integer + `[name]`) is significant; the
+/// indented continuation line is ignored.
+pub fn parse_proc_asound_cards(contents: &str) -> Vec<(u32, String)> {
+    let mut out = Vec::new();
+    for line in contents.lines() {
+        let t = line.trim_start();
+        let digit_end = t.find(|c: char| !c.is_ascii_digit()).unwrap_or(t.len());
+        if digit_end == 0 {
+            continue; // continuation / non-header line
+        }
+        let idx: u32 = match t[..digit_end].parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let lb = match t.find('[') {
+            Some(i) => i,
+            None => continue,
+        };
+        let rb = match t[lb + 1..].find(']') {
+            Some(i) => lb + 1 + i,
+            None => continue,
+        };
+        let name = t[lb + 1..rb].trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        out.push((idx, name));
+    }
+    out
+}
+
+/// Extract the ALSA `CARD=` token from a cpal pcm_id: the slice between
+/// `CARD=` and the next `,` (or end). `hw:CARD=Device,DEV=0` -> `Device`,
+/// `plughw:CARD=1` -> `1`. `None` for ids with no card token (`default`,
+/// non-ALSA platforms).
+pub fn alsa_card_token(pcm_id: &str) -> Option<&str> {
+    let start = pcm_id.find("CARD=")? + "CARD=".len();
+    let rest = &pcm_id[start..];
+    let end = rest.find(',').unwrap_or(rest.len());
+    let tok = &rest[..end];
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok)
+    }
+}
+
+/// Map a `CARD=` token (kernel card name *or* numeric index string) to its
+/// canonical card index, built from parsed `/proc/asound/cards` rows.
+pub fn build_card_resolver(cards: &[(u32, String)]) -> HashMap<String, u32> {
+    let mut m = HashMap::new();
+    for (idx, name) in cards {
+        m.insert(name.clone(), *idx);
+        m.insert(idx.to_string(), *idx);
+    }
+    m
+}
+
+/// Probe-order rank within one physical card. Lower = tried first:
+/// `plughw:` (ALSA software conversion, tolerant of cheap USB chips)
+/// before raw `hw:`; stable alphabetic card name before volatile numeric
+/// index. This keeps the historically-recommended `plughw:CARD=<name>`
+/// first (AIOC / DigiRig stay unchanged) while still allowing fallthrough
+/// to a raw `hw:` form for hardware whose plughw path fails to stream.
+fn alsa_candidate_rank(pcm_id: &str) -> (u8, u8) {
+    let prefix = if pcm_id.starts_with("plughw:") {
+        0
+    } else if pcm_id.starts_with("hw:") {
+        1
+    } else {
+        2
+    };
+    let name_form = match alsa_card_token(pcm_id) {
+        Some(t) if t.starts_with(|c: char| c.is_ascii_alphabetic()) => 0,
+        Some(_) => 1,
+        None => 2,
+    };
+    (prefix, name_form)
+}
+
+/// One physical ALSA card with its candidate PCM ids ordered best-first.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AlsaCardGroup {
+    /// Canonical key: `"card:<idx>"` for resolvable cards, else the raw
+    /// pcm_id (so `default` and unknown ids stay as singleton entries).
+    pub key: String,
+    /// PCM ids for this card, ordered by probe preference.
+    pub candidates: Vec<String>,
+}
+
+/// Collapse cpal-reported ALSA pcm_ids to one entry per physical card.
+///
+/// `resolve` maps a `CARD=` token to the canonical card index; pcm_ids
+/// whose token does not resolve (or have none) become singleton groups
+/// keyed by the pcm_id itself. Within a group, candidates are ordered
+/// best-first via [`alsa_candidate_rank`]. First-seen card order is
+/// preserved so the picker ordering stays stable.
+pub fn group_alsa_cards(
+    pcm_ids: &[String],
+    resolve: impl Fn(&str) -> Option<u32>,
+) -> Vec<AlsaCardGroup> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+    for id in pcm_ids {
+        let key = match alsa_card_token(id).and_then(&resolve) {
+            Some(idx) => format!("card:{}", idx),
+            None => id.clone(),
+        };
+        if !groups.contains_key(&key) {
+            order.push(key.clone());
+        }
+        groups.entry(key).or_default().push(id.clone());
+    }
+    order
+        .into_iter()
+        .map(|key| {
+            let mut candidates = groups.remove(&key).unwrap();
+            // slice::sort_by_key is stable: equal-rank pcm_ids keep their
+            // cpal enumeration order.
+            candidates.sort_by_key(|p| alsa_candidate_rank(p));
+            AlsaCardGroup { key, candidates }
+        })
+        .collect()
+}
+
+/// Pick the best input stream config for a brief probe / level scan:
+/// fewest channels (mono > stereo) and most-native sample format
+/// (I16 > F32 > U16), at a preferred scan rate the range supports.
+///
+/// Shared by the device-detection probe ([`probe_capture`])
+/// and the input-level scanner so both negotiate identically.
+/// `default_input_config()` is deliberately not used — it can hand back
+/// parameters a raw `hw:` ALSA device rejects with EINVAL.
+pub fn pick_input_probe_config(dev: &Device) -> Result<(SampleFormat, StreamConfig), String> {
+    let configs = dev.supported_input_configs().map_err(|e| format!("{}", e))?;
+    let mut best: Option<cpal::SupportedStreamConfigRange> = None;
+    for cfg in configs {
+        let dominated_by_best = best.as_ref().is_some_and(|b| {
+            if cfg.channels() > b.channels() {
+                return true;
+            }
+            if cfg.channels() < b.channels() {
+                return false;
+            }
+            let rank = |f: SampleFormat| match f {
+                SampleFormat::I16 => 0,
+                SampleFormat::F32 => 1,
+                _ => 2,
+            };
+            rank(cfg.sample_format()) >= rank(b.sample_format())
+        });
+        if !dominated_by_best {
+            best = Some(cfg);
+        }
+    }
+    let range = best.ok_or_else(|| "no supported input configurations".to_string())?;
+    let rate = super::PREFERRED_SCAN_RATES
+        .iter()
+        .copied()
+        .find(|&r| r >= range.min_sample_rate() && r <= range.max_sample_rate())
+        .unwrap_or(range.max_sample_rate());
+    Ok((
+        range.sample_format(),
+        StreamConfig {
+            channels: range.channels(),
+            sample_rate: rate,
+            buffer_size: cpal::BufferSize::Default,
+        },
+    ))
+}
+
+/// Briefly open `dev` for capture and report whether it actually streams.
+///
+/// Returns `true` only if a stream builds, `play()`s, and delivers at
+/// least one callback within `timeout` without the cpal error callback
+/// firing — the `alsa::poll() returned POLLERR` path that breaks cheap
+/// USB audio chips routed through `plughw:`/named PCMs.
+/// The stream is always dropped before returning, releasing the device.
+///
+/// MUST NOT be called on hardware already held by a live capture stream:
+/// opening a second stream on an in-use device can disrupt the running
+/// radio and, on cheap chips, fail spuriously. Callers gate this through
+/// the in-use snapshot in `enumerate_audio_devices`.
+pub fn probe_capture(dev: &Device, timeout: Duration) -> bool {
+    let (fmt, cfg) = match pick_input_probe_config(dev) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let failed = Arc::new(AtomicBool::new(false));
+    let got_data = Arc::new(AtomicBool::new(false));
+
+    let build: Result<cpal::Stream, cpal::BuildStreamError> = match fmt {
+        SampleFormat::F32 => {
+            let gd = got_data.clone();
+            let ef = failed.clone();
+            dev.build_input_stream(
+                &cfg,
+                move |_d: &[f32], _| gd.store(true, Ordering::Relaxed),
+                move |e| {
+                    eprintln!("probe_capture stream error: {}", e);
+                    ef.store(true, Ordering::Relaxed);
+                },
+                None,
+            )
+        }
+        SampleFormat::I16 => {
+            let gd = got_data.clone();
+            let ef = failed.clone();
+            dev.build_input_stream(
+                &cfg,
+                move |_d: &[i16], _| gd.store(true, Ordering::Relaxed),
+                move |e| {
+                    eprintln!("probe_capture stream error: {}", e);
+                    ef.store(true, Ordering::Relaxed);
+                },
+                None,
+            )
+        }
+        SampleFormat::U16 => {
+            let gd = got_data.clone();
+            let ef = failed.clone();
+            dev.build_input_stream(
+                &cfg,
+                move |_d: &[u16], _| gd.store(true, Ordering::Relaxed),
+                move |e| {
+                    eprintln!("probe_capture stream error: {}", e);
+                    ef.store(true, Ordering::Relaxed);
+                },
+                None,
+            )
+        }
+        _ => return false,
+    };
+
+    let stream = match build {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if stream.play().is_err() {
+        return false;
+    }
+
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if failed.load(Ordering::Relaxed) {
+            return false;
+        }
+        if got_data.load(Ordering::Relaxed) {
+            // Real audio flowed. Give POLLERR a short grace window to
+            // surface (the cheap-chip failure can lag the first period),
+            // then accept if still clean.
+            thread::sleep(Duration::from_millis(40));
+            return !failed.load(Ordering::Relaxed);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    // Timed out: a usable device delivers a callback quickly and stays
+    // error-free; one that never produced data or errored is not usable.
+    got_data.load(Ordering::Relaxed) && !failed.load(Ordering::Relaxed)
 }
 
 /// Resolve a cpal output [`Device`] by its pcm_id (e.g. `plughw:CARD=Foo,DEV=0`).
@@ -983,6 +1278,106 @@ mod tests {
             Ok(_) => panic!("expected out-of-range rejection"),
         }
     }
+
+    // --- ALSA physical-card canonicalization --------------------------
+
+    /// Verbatim `/proc/asound/cards` from the field report (Pi 3B,
+    /// Trixie, GeneralPlus USB dongle), including the indented
+    /// continuation lines that must be ignored.
+    const ISSUE_129_PROC_CARDS: &str = "\
+ 0 [Headphones     ]: bcm2835_headpho - bcm2835 Headphones
+                      bcm2835 Headphones
+ 1 [Device         ]: USB-Audio - USB Audio Device
+                      GeneralPlus USB Audio Device at usb-3f980000.usb-1.5, full speed
+ 2 [vc4hdmi        ]: vc4-hdmi - vc4-hdmi
+                      vc4-hdmi
+";
+
+    #[test]
+    fn parse_proc_asound_cards_ignores_continuation_lines() {
+        let got = parse_proc_asound_cards(ISSUE_129_PROC_CARDS);
+        assert_eq!(
+            got,
+            vec![
+                (0, "Headphones".to_string()),
+                (1, "Device".to_string()),
+                (2, "vc4hdmi".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_proc_asound_cards_handles_empty_and_garbage() {
+        assert!(parse_proc_asound_cards("").is_empty());
+        assert!(parse_proc_asound_cards("no leading digit here\n   indented\n").is_empty());
+    }
+
+    #[test]
+    fn alsa_card_token_extracts_name_and_index_forms() {
+        assert_eq!(alsa_card_token("hw:CARD=Device,DEV=0"), Some("Device"));
+        assert_eq!(alsa_card_token("plughw:CARD=1,DEV=0"), Some("1"));
+        assert_eq!(alsa_card_token("plughw:CARD=AIOC"), Some("AIOC"));
+        assert_eq!(alsa_card_token("default"), None);
+        assert_eq!(alsa_card_token("hw:CARD="), None);
+        assert_eq!(alsa_card_token("sysdefault:CARD=Device,DEV=0"), Some("Device"));
+    }
+
+    #[test]
+    fn build_card_resolver_maps_name_and_index_to_same_card() {
+        let cards = parse_proc_asound_cards(ISSUE_129_PROC_CARDS);
+        let r = build_card_resolver(&cards);
+        assert_eq!(r.get("Device").copied(), Some(1));
+        assert_eq!(r.get("1").copied(), Some(1));
+        assert_eq!(r.get("Headphones").copied(), Some(0));
+        assert_eq!(r.get("0").copied(), Some(0));
+        assert_eq!(r.get("nonexistent").copied(), None);
+    }
+
+    #[test]
+    fn group_alsa_cards_collapses_aliases_and_orders_candidates() {
+        let cards = parse_proc_asound_cards(ISSUE_129_PROC_CARDS);
+        let resolver = build_card_resolver(&cards);
+        // The mix cpal's ALSA backend reports for this Pi: numeric and
+        // symbolic forms of both physical capture cards, plus `default`.
+        let pcm_ids: Vec<String> = [
+            "hw:CARD=Headphones,DEV=0",
+            "plughw:CARD=Headphones,DEV=0",
+            "hw:CARD=0,DEV=0",
+            "plughw:CARD=0,DEV=0",
+            "hw:CARD=Device,DEV=0",
+            "plughw:CARD=Device,DEV=0",
+            "hw:CARD=1,DEV=0",
+            "plughw:CARD=1,DEV=0",
+            "default",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let groups = group_alsa_cards(&pcm_ids, |t| resolver.get(t).copied());
+
+        // Two physical cards + the `default` singleton, first-seen order.
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].key, "card:0");
+        assert_eq!(groups[1].key, "card:1");
+        assert_eq!(groups[2].key, "default");
+
+        // The GeneralPlus USB card: every alias collapsed, ordered
+        // plughw-name > plughw-index > hw-name > hw-index. The broken
+        // `plughw:CARD=Device` is tried first (AIOC/DigiRig succeed there,
+        // unchanged); a probe failure falls through to `hw:CARD=1`, the
+        // only form that streams on this hardware.
+        assert_eq!(
+            groups[1].candidates,
+            vec![
+                "plughw:CARD=Device,DEV=0".to_string(),
+                "plughw:CARD=1,DEV=0".to_string(),
+                "hw:CARD=Device,DEV=0".to_string(),
+                "hw:CARD=1,DEV=0".to_string(),
+            ]
+        );
+        assert_eq!(groups[2].candidates, vec!["default".to_string()]);
+    }
 }
 
 /// Read-only enumeration of every cpal host's input + output devices.
@@ -1018,11 +1413,14 @@ pub mod listing {
         pub name: String,
         pub direction: String,
         pub is_default: bool,
-        // Mirrors graywolf-modem's runtime-API "Recommended" badge
-        // (see web/src/routes/AudioDevices.svelte). Set when the
-        // cpal-reported PCM id is `plughw:CARD=<name>` with a stable
-        // alphabetic card name (not a numeric index that changes
-        // across reboots when USB enumeration reorders).
+        // Flare-side "Recommended" *hint*. Set from the string-only
+        // `is_recommended_pcm_id` heuristic (`plughw:CARD=<name>` with a
+        // stable alphabetic card name). This intentionally does NOT
+        // match the live web picker for capture devices — the
+        // runtime path probes the device and recommends the form that
+        // actually streams, which `--list-audio` cannot do safely from
+        // a separate process. The live picker is authoritative; this
+        // stays a cheap triage hint.
         #[serde(skip_serializing_if = "is_false")]
         pub recommended: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
