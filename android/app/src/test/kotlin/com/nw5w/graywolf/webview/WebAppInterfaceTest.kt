@@ -146,6 +146,21 @@ class WebAppInterfaceTest {
         assertTrue("script must contain true", script.contains("true"))
     }
 
+    @Test
+    fun `requestUsbPermission with malformed callbackId rejects and does not call adapter`() {
+        val wv = mockWebView()
+        val adapter = mock<UsbPttAdapter>()
+
+        iface(webView = wv, adapter = adapter).requestUsbPermission(
+            vid = 0x10C4,
+            pid = 0xEA60,
+            callbackId = "foo'); alert(1)",
+        )
+
+        verify(adapter, never()).requestPermissionFor(any(), any(), any())
+        verify(wv, never()).evaluateJavascript(any(), any())
+    }
+
     // -----------------------------------------------------------------------
     // Phase-3 regression: no raw PTT methods on the public surface
     // -----------------------------------------------------------------------

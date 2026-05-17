@@ -47,14 +47,20 @@ class WebAppInterface(
      *
      * Result is posted back into the WebView via:
      *   window.__usbResult(callbackId, granted: boolean)
+     *
+     * callbackId is validated to match ^[A-Za-z0-9_-]+$ before JS interpolation.
+     * Invalid callbackId values are rejected to prevent string-escape attacks.
      */
     @JavascriptInterface
     fun requestUsbPermission(vid: Int, pid: Int, callbackId: String) {
+        if (!CALLBACK_ID_RE.matches(callbackId)) {
+            Log.w(TAG, "rejected invalid callbackId: $callbackId")
+            return
+        }
         adapter.requestPermissionFor(vid, pid) { granted ->
             webView.post {
-                val safeId = callbackId.replace("'", "\\'")
-                val script = "window.__usbResult && window.__usbResult('$safeId', $granted)"
-                Log.d(TAG, "usbResult callbackId=$safeId granted=$granted")
+                val script = "window.__usbResult && window.__usbResult('$callbackId', $granted)"
+                Log.d(TAG, "usbResult callbackId=$callbackId granted=$granted")
                 webView.evaluateJavascript(script, null)
             }
         }
@@ -62,5 +68,6 @@ class WebAppInterface(
 
     companion object {
         private const val TAG = "WebAppInterface"
+        private val CALLBACK_ID_RE = Regex("^[A-Za-z0-9_-]+$")
     }
 }
