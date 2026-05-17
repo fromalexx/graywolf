@@ -19,7 +19,7 @@ import com.nw5w.graywolf.jni.AudioTxCallback
  * Pass an Application context to avoid leaking the Service.
  */
 class AudioTxPump(
-    private val ctx: Context,
+    private val appContext: Context,
     // Internal factory hook for unit tests. Production callers leave it null.
     private val trackFactory: ((Int) -> AudioTrack)? = null,
 ) : AudioTxCallback {
@@ -28,7 +28,7 @@ class AudioTxPump(
     @Volatile private var routedDevice: String = "<none>"
 
     private val am: AudioManager by lazy {
-        ctx.getSystemService(AudioManager::class.java)
+        appContext.getSystemService(AudioManager::class.java)
     }
 
     private val deviceCallback = object : AudioManager.AudioDeviceCallback() {
@@ -43,6 +43,8 @@ class AudioTxPump(
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
             val t = track ?: return
+            // preferredDevice is null when we never explicitly routed (e.g. boot with no
+            // USB device present); in that case there's nothing to unwire here.
             val current = t.preferredDevice ?: return
             val removed = removedDevices.any { it.id == current.id }
             if (removed) {
@@ -87,7 +89,7 @@ class AudioTxPump(
 
         // Auto-route to first USB audio output.
         val usbOut = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }
+            .firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }
         if (usbOut != null) {
             t.setPreferredDevice(usbOut)
             routedDevice = usbOut.productName?.toString() ?: "USB device"
@@ -119,9 +121,12 @@ class AudioTxPump(
     fun stop() {
         val t = track ?: return
         am.unregisterAudioDeviceCallback(deviceCallback)
-        try { t.stop() } catch (_: Throwable) {}
-        t.release()
-        track = null
+        try {
+            try { t.stop() } catch (_: Throwable) {}
+            try { t.release() } catch (_: Throwable) {}
+        } finally {
+            track = null
+        }
         Log.i(TAG, "AudioTxPump stopped")
     }
 
