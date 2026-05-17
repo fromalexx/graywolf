@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -221,4 +222,53 @@ func (r *txSinkRecorder) got() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.frames)
+}
+
+// TestSerialSupervisor_RxRoundTrip writes a KISS-framed AX.25 packet
+// into the supervisor's port and asserts the owned Server decoded and
+// delivered it to the recorder Sink on the mapped channel.
+func TestSerialSupervisor_RxRoundTrip(t *testing.T) {
+	// netPipe gives a real bidirectional io.ReadWriteCloser. The
+	// supervisor reads the server side; the test writes the client
+	// side.
+	srvSide, cliSide := net.Pipe()
+	rwc := struct {
+		io.ReadWriteCloser
+	}{srvSide}
+
+	rec := &txSinkRecorder{}
+	srv := NewServer(ServerConfig{
+		Name:       "ser-rx",
+		Mode:       ModeModem,
+		ChannelMap: map[uint8]uint32{0: 7},
+		Sink:       rec,
+	})
+	sup := NewSerial(SerialConfig{
+		Name: "s", Device: "d", BaudRate: 9600,
+		ReconnectInitMs: 10, ReconnectMaxMs: 20,
+		OpenFunc: func(string, uint32) (io.ReadWriteCloser, error) { return rwc, nil },
+	}, srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.run(ctx)
+	waitState(t, sup, StateConnected)
+
+	// kissUIFrameBytes returns raw AX.25 bytes (f.Encode(), not KISS-wrapped).
+	// Encode(0, ax) wraps them in a KISS frame for port 0.
+	ax := kissUIFrameBytes(t, "hello")
+	frame := Encode(0, ax)
+	go func() { _, _ = cliSide.Write(frame) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if rec.got() > 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if rec.got() == 0 {
+		t.Fatal("Sink never received the decoded frame — owned Server RX path not wired")
+	}
+	cancel()
+	sup.close()
 }
