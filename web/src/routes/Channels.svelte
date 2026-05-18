@@ -23,6 +23,7 @@
     ariaLabel as pttAriaLabel,
   } from '../lib/channelPtt.js';
   import { groupReferrers, totalReferrers } from '../lib/channelReferrers.js';
+  import { blankForm, rowToForm, formToPayload, validateForm } from '../lib/channelForm.js';
 
   // The Channels page itself hydrates the shared store: this page is
   // the cheapest place for a first-visit operator to land, so it
@@ -105,10 +106,6 @@
     { value: '0', label: '0 (Left/Mono)' },
     { value: '1', label: '1 (Right)' },
   ];
-
-  const txTimingDefaults = {
-    tx_delay_ms: '300', tx_tail_ms: '100', slot_ms: '100', persist: '63', full_dup: false,
-  };
 
   // Android PTT method constants — must match PTT_METHOD_* in ptt_android.rs
   // and the Kotlin UsbPttAdapter dispatcher (Appendix B of the 4b spec).
@@ -323,15 +320,7 @@
     stopUsbPoll();
     clearPttHold();
     const defaultInput = inputDevices.length > 0 ? String(inputDevices[0].id) : '0';
-    form = {
-      name: '',
-      mode: 'aprs',
-      channel_type: 'modem',
-      input_device_id: defaultInput, input_channel: '0',
-      output_device_id: '0', output_channel: '0',
-      modem_type: 'afsk', bit_rate: '1200', mark_freq: '1200', space_freq: '2200',
-      ...txTimingDefaults,
-    };
+    form = { ...blankForm(), input_device_id: defaultInput };
     errors = {};
     if (Platform.kind === 'android') {
       androidPttMethod = PTT_METHOD_CP2102N_RTS;
@@ -344,84 +333,24 @@
     editing = row;
     stopUsbPoll();
     clearPttHold();
-    const timing = txTimings[row.id] || {};
     // Phase 2: input_device_id is nullable on the wire. Null means
     // KISS-TNC-only; any non-null value means modem-backed. The
     // segmented picker is read-only on edit (D11) — the "Convert…"
     // link below the badge is the only way to flip it.
-    const channelType = row.input_device_id == null ? 'kiss-tnc' : 'modem';
-    form = {
-      ...row,
-      mode: row.mode || 'aprs',
-      channel_type: channelType,
-      input_device_id: row.input_device_id == null ? '0' : String(row.input_device_id),
-      input_channel: String(row.input_channel),
-      output_device_id: String(row.output_device_id),
-      output_channel: String(row.output_channel),
-      bit_rate: String(row.bit_rate),
-      mark_freq: String(row.mark_freq),
-      space_freq: String(row.space_freq),
-      tx_delay_ms: String(timing.tx_delay_ms ?? 300),
-      tx_tail_ms: String(timing.tx_tail_ms ?? 100),
-      slot_ms: String(timing.slot_ms ?? 100),
-      persist: String(timing.persist ?? 63),
-      full_dup: timing.full_dup ?? false,
-    };
+    form = rowToForm(row, txTimings[row.id]);
     errors = {};
     loadAndroidPttMethod(row);
     modalOpen = true;
   }
 
   function validate() {
-    const e = {};
-    if (!form.name.trim()) e.name = 'Required';
-    if (isModemType) {
-      if (!form.input_device_id || form.input_device_id === '0') {
-        e.input_device_id = 'Required';
-      }
-    }
-    if (isTxEnabled) {
-      const p = parseInt(form.persist);
-      if (isNaN(p) || p < 0 || p > 255) e.persist = 'Must be 0–255';
-    }
-    errors = e;
-    return Object.keys(e).length === 0;
-  }
-
-  // buildPayload shapes the form into the ChannelRequest DTO. KISS-TNC
-  // channels send input_device_id: null and force the audio/output
-  // fields to zero (the backend validator also enforces this, but we
-  // match it here so the UI never submits a known-invalid row).
-  function buildPayload() {
-    const base = {
-      name: form.name,
-      mode: form.mode,
-      modem_type: form.modem_type,
-      bit_rate: parseInt(form.bit_rate, 10),
-      mark_freq: parseInt(form.mark_freq, 10),
-      space_freq: parseInt(form.space_freq, 10),
-      input_channel: parseInt(form.input_channel, 10),
-      output_channel: parseInt(form.output_channel, 10),
-    };
-    if (form.channel_type === 'kiss-tnc') {
-      return {
-        ...base,
-        input_device_id: null,
-        input_channel: 0,
-        output_device_id: 0,
-        output_channel: 0,
-      };
-    }
-    return {
-      ...base,
-      input_device_id: parseInt(form.input_device_id, 10),
-      output_device_id: parseInt(form.output_device_id, 10),
-    };
+    errors = validateForm(form);
+    return Object.keys(errors).length === 0;
   }
 
   async function handleSave() {
     if (!validate()) return;
-    const data = buildPayload();
+    const data = formToPayload(form);
     await persistSave(data, { force: false });
   }
 
