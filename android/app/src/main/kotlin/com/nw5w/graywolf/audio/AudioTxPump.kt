@@ -2,6 +2,7 @@ package com.nw5w.graywolf.audio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -31,7 +32,7 @@ class AudioTxPump(
         appContext.getSystemService(AudioManager::class.java)
     }
 
-    private val deviceCallback = object : AudioManager.AudioDeviceCallback() {
+    private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
             val usbOut = addedDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }
                 ?: return
