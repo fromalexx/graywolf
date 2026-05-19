@@ -2470,6 +2470,7 @@ mod tests {
                 invert: false,
                 gpio_pin: 3,
                 gpio_line: 0,
+                ptt_method: 0,
             })),
         };
         assert!(!modem.handle_ipc(msg));
@@ -2511,6 +2512,7 @@ mod tests {
                 invert: false,
                 gpio_pin: 3,
                 gpio_line: 0,
+                ptt_method: 0,
             })),
         };
         assert!(!modem.handle_ipc(msg));
@@ -2546,6 +2548,7 @@ mod tests {
                 invert: false,
                 gpio_pin: 3,
                 gpio_line: 0,
+                ptt_method: 0,
             })),
         };
         assert!(!modem.handle_ipc(msg));

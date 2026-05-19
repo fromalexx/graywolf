@@ -143,9 +143,9 @@ pub(crate) enum PttMethod {
     /// Hamlib rigctld over TCP. `device` is `"host:port"`.
     Rigctld,
     /// Android USB PTT — delegates to Kotlin's UsbPttAdapter via JNI.
-    /// The method int (one of the ptt_android_consts values) is carried
-    /// in ConfigurePtt.gpio_pin to avoid a proto change for T3; see
-    /// build_driver for the field-reuse comment.
+    /// The transport selector (1..4, see [`crate::tx::ptt_android_consts`])
+    /// travels in `ConfigurePtt.ptt_method`;
+    /// `gpio_pin` is CM108-only and is not read on this path.
     Android,
 }
 
@@ -572,10 +572,11 @@ impl PortRegistry {
                         PTT_METHOD_AIOC_CDC_DTR, PTT_METHOD_CM108_HID, PTT_METHOD_CP2102N_RTS,
                         PTT_METHOD_VOX,
                     };
-                    // The method int is carried in cfg.gpio_pin (field reuse:
-                    // no proto change required for T3; gpio_pin is unused by the
-                    // Android path for its original CM108-pin purpose).
-                    let method = cfg.gpio_pin as i32;
+                    // The Android USB-PTT transport selector lives in
+                    // cfg.ptt_method (PttMethod enum 1..4). cfg.gpio_pin is
+                    // ignored on the Android path — it carries the CM108
+                    // pin and only the cm108 method consumes it.
+                    let method = cfg.ptt_method as i32;
                     match method {
                         PTT_METHOD_CP2102N_RTS
                         | PTT_METHOD_CM108_HID
@@ -800,6 +801,7 @@ pub(crate) mod tests {
             invert: false,
             gpio_pin: 3,
             gpio_line: 0,
+            ptt_method: 0,
         }
     }
 
@@ -1702,8 +1704,7 @@ pub(crate) mod tests {
             let mut registry = PortRegistry::new();
             let cfg = ConfigurePtt {
                 method: "android".into(),
-                // gpio_pin carries the method int — see build_driver comment.
-                gpio_pin: PTT_METHOD_CP2102N_RTS as u32,
+                ptt_method: PTT_METHOD_CP2102N_RTS as u32,
                 ..base_cfg()
             };
 
@@ -1730,6 +1731,31 @@ pub(crate) mod tests {
             crate::clear_mocks();
         }
 
+        // Proves gpio_pin is ignored on the Android path: ptt_method=3
+        // (AIOC_CDC_DTR) must build even though gpio_pin=99 is invalid.
+        #[test]
+        #[serial]
+        fn android_build_driver_reads_ptt_method_not_gpio_pin() {
+            crate::clear_mocks();
+            crate::install_ptt_mock(|_, _| true);
+
+            let mut registry = PortRegistry::new();
+            let cfg = ConfigurePtt {
+                method: "android".into(),
+                ptt_method: PTT_METHOD_AIOC_CDC_DTR as u32, // 3
+                gpio_pin: 99,                                // MUST be ignored
+                ..base_cfg()
+            };
+
+            let drv = registry.build_driver(&cfg);
+            assert!(
+                drv.is_ok(),
+                "android+ptt_method=3 must build (gpio_pin=99 must be ignored): {:?}",
+                drv.err()
+            );
+            crate::clear_mocks();
+        }
+
         #[test]
         #[serial]
         fn build_driver_android_valid_for_all_four_method_ints() {
@@ -1745,7 +1771,7 @@ pub(crate) mod tests {
                 let mut registry = PortRegistry::new();
                 let cfg = ConfigurePtt {
                     method: "android".into(),
-                    gpio_pin: method as u32,
+                    ptt_method: method as u32,
                     ..base_cfg()
                 };
                 assert!(
@@ -1763,7 +1789,7 @@ pub(crate) mod tests {
             let mut registry = PortRegistry::new();
             let cfg = ConfigurePtt {
                 method: "android".into(),
-                gpio_pin: 99, // not a valid PTT method int
+                ptt_method: 99, // not a valid PTT method int
                 ..base_cfg()
             };
             let err = expect_err(registry.build_driver(&cfg));
@@ -1783,7 +1809,7 @@ pub(crate) mod tests {
             let mut registry = PortRegistry::new();
             let cfg = ConfigurePtt {
                 method: "android".into(),
-                gpio_pin: 0, // PTT_METHOD_UNKNOWN
+                ptt_method: 0, // PTT_METHOD_UNKNOWN
                 ..base_cfg()
             };
             let err = expect_err(registry.build_driver(&cfg));
