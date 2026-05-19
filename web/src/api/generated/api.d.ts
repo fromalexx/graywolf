@@ -2287,13 +2287,15 @@ export interface components {
         "dto.ChannelPtt": {
             configured?: boolean;
             detail?: string;
-            /**
-             * @description GpioPin carries the CM108 HID pin (cm108 method) and, on Android,
-             *     the PTT method int (1..4, spec Appendix B) reused as a carrier so
-             *     the channel edit modal can restore the selected method. 0 = unset.
-             */
+            /** @description GpioPin is the CM108 HID pin (cm108 method only). 0 = unset. */
             gpio_pin?: number;
             method?: string;
+            /**
+             * @description PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)
+             *     when Method=="android"; 0 otherwise. The channel-edit modal
+             *     restores the selected Android method from this.
+             */
+            ptt_method?: number;
         };
         "dto.ChannelRequest": {
             bit_rate?: number;
@@ -2685,14 +2687,18 @@ export interface components {
              */
             gpio_line?: number;
             /**
-             * @description GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3). Not used
-             *     by the `gpio` method, which references `gpio_line` instead to avoid
-             *     indexing ambiguity between CM108 pin numbers and gpiochip line offsets.
+             * @description GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3).
+             *     cm108 method only. The `gpio` method uses `gpio_line` instead.
              */
             gpio_pin?: number;
             invert?: boolean;
             method?: string;
             persist?: number;
+            /**
+             * @description PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)
+             *     when Method=="android". Not used by desktop methods.
+             */
+            ptt_method?: number;
             slot_time_ms?: number;
         };
         "dto.PttResponse": {
@@ -2705,15 +2711,19 @@ export interface components {
              */
             gpio_line?: number;
             /**
-             * @description GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3). Not used
-             *     by the `gpio` method, which references `gpio_line` instead to avoid
-             *     indexing ambiguity between CM108 pin numbers and gpiochip line offsets.
+             * @description GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3).
+             *     cm108 method only. The `gpio` method uses `gpio_line` instead.
              */
             gpio_pin?: number;
             id?: number;
             invert?: boolean;
             method?: string;
             persist?: number;
+            /**
+             * @description PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)
+             *     when Method=="android". Not used by desktop methods.
+             */
+            ptt_method?: number;
             slot_time_ms?: number;
         };
         "dto.RegisterRequest": {

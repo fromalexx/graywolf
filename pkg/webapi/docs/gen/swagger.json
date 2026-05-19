@@ -8430,11 +8430,15 @@
                     "type": "string"
                 },
                 "gpio_pin": {
-                    "description": "GpioPin carries the CM108 HID pin (cm108 method) and, on Android,\nthe PTT method int (1..4, spec Appendix B) reused as a carrier so\nthe channel edit modal can restore the selected method. 0 = unset.",
+                    "description": "GpioPin is the CM108 HID pin (cm108 method only). 0 = unset.",
                     "type": "integer"
                 },
                 "method": {
                     "type": "string"
+                },
+                "ptt_method": {
+                    "description": "PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)\nwhen Method==\"android\"; 0 otherwise. The channel-edit modal\nrestores the selected Android method from this.",
+                    "type": "integer"
                 }
             }
         },
@@ -9382,7 +9386,7 @@
                     "type": "integer"
                 },
                 "gpio_pin": {
-                    "description": "GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3). Not used\nby the `gpio` method, which references `gpio_line` instead to avoid\nindexing ambiguity between CM108 pin numbers and gpiochip line offsets.",
+                    "description": "GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3).\ncm108 method only. The `gpio` method uses `gpio_line` instead.",
                     "type": "integer"
                 },
                 "invert": {
@@ -9392,6 +9396,10 @@
                     "type": "string"
                 },
                 "persist": {
+                    "type": "integer"
+                },
+                "ptt_method": {
+                    "description": "PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)\nwhen Method==\"android\". Not used by desktop methods.",
                     "type": "integer"
                 },
                 "slot_time_ms": {
@@ -9416,7 +9424,7 @@
                     "type": "integer"
                 },
                 "gpio_pin": {
-                    "description": "GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3). Not used\nby the `gpio` method, which references `gpio_line` instead to avoid\nindexing ambiguity between CM108 pin numbers and gpiochip line offsets.",
+                    "description": "GpioPin is the CM108 HID GPIO pin number (1-indexed, default 3).\ncm108 method only. The `gpio` method uses `gpio_line` instead.",
                     "type": "integer"
                 },
                 "id": {
@@ -9429,6 +9437,10 @@
                     "type": "string"
                 },
                 "persist": {
+                    "type": "integer"
+                },
+                "ptt_method": {
+                    "description": "PttMethod is the Android USB-PTT transport (PttMethod enum 1..4)\nwhen Method==\"android\". Not used by desktop methods.",
                     "type": "integer"
                 },
                 "slot_time_ms": {

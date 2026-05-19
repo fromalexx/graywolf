@@ -118,18 +118,14 @@
         await api.put(`/tx-timing/${channelId}`, timingData);
       }
 
-      // On Android, persist the PTT method via POST /api/ptt.
-      // Data shape: method='android', gpio_pin=method_int (1–4 per Appendix B).
-      // The Go modembridge reads gpio_pin to determine which USB transport
-      // to invoke in UsbPttAdapter (T7). This reuses the existing PttConfig
-      // row's gpio_pin field as a method-int carrier rather than adding a
-      // new schema column — the semantics are different from the desktop
-      // gpio-line use but the field is otherwise unused on Android channels.
+      // On Android, persist the PTT transport as a first-class field.
+      // method='android' is the subsystem discriminator; ptt_method is
+      // the transport (PttMethod enum 1..4, spec Appendix B).
       if (Platform.kind === 'android' && androidPttMethod != null && channelId) {
         await api.post('/ptt', {
           channel_id: channelId,
           method: 'android',
-          gpio_pin: androidPttMethod,
+          ptt_method: androidPttMethod,
         });
       }
 

@@ -66,8 +66,8 @@
           form = rowToForm(row, (txTimings || {})[row.id]);
           errors = {};
           if (Platform.kind === 'android') {
-            if (row.ptt?.method === 'android' && row.ptt?.gpio_pin) {
-              androidPttMethod = row.ptt.gpio_pin;
+            if (row.ptt?.method === 'android' && row.ptt?.ptt_method) {
+              androidPttMethod = row.ptt.ptt_method;
             } else {
               androidPttMethod = PTT_METHOD_CP2102N_RTS;
             }
