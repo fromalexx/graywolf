@@ -112,12 +112,13 @@ Source: [`../../pkg/webapi/ptt.go`](../../pkg/webapi/ptt.go) (`validatePttChanne
 [`../../pkg/webapi/ptt_test.go`](../../pkg/webapi/ptt_test.go) (`TestPttRejectsKissOnlyChannel`);
 [`../../web/src/routes/Ptt.svelte`](../../web/src/routes/Ptt.svelte) (`modemChannels` filter).
 
-### 9c. Android PTT method rides in `gpio_pin`; every PTT read path must round-trip it
+### 9c. Android PTT transport is a first-class `ptt_method`; `gpio_pin` is CM108-only
 
-*Why:* On Android there is no dedicated PTT-method column. The Channels modal sends `POST /api/ptt {method:"android", gpio_pin:N}` where `N` is the method int from spec Appendix B (1 = CP2102N RTS / Digirig, 2 = CM108 HID, 3 = AIOC CDC-ACM DTR, 4 = VOX). That int rides in `PttConfig.GpioPin` the whole way: configstore → `session.go` (which must NOT zero `gpio_pin` for `method=="android"` — it only zeroes it for `method=="gpio"`) → `ConfigurePtt.GpioPin` → Rust `build_driver` (`PttMethod::Android` does `let method = cfg.gpio_pin as i32`) → `AndroidPtt` → JNI → Kotlin `UsbPttAdapter.pttSet`. Therefore **any response DTO or read path that surfaces a channel's PTT must carry `gpio_pin`**. If it doesn't, the edit modal can't restore the selected method, falls back to CP2102N, and the next save of that channel POSTs `gpio_pin=1`, silently downgrading a saved AIOC/CM108 config to CP2102N (this was the `ChannelPtt`-DTO bug fixed in #149). The Kotlin doc was correspondingly wrong: AIOC keys via CDC-ACM DTR (RTS held low), not CM108 HID GPIO.
+*Why:* The Android per-channel PTT transport (PttMethod enum, spec Appendix B: 1 = CP2102N RTS / Digirig, 2 = CM108 HID, 3 = AIOC CDC-ACM DTR, 4 = VOX) travels in its own field the whole way: SPA `POST /api/ptt {method:"android", ptt_method:N}` → `PttConfig.PttMethod` → `session.go` → `ConfigurePtt.ptt_method` (a `uint32`, deliberately not the `platform.proto` enum, to keep `graywolf.proto` self-contained — invariant #2) → Rust `build_driver` (`PttMethod::Android` does `let method = cfg.ptt_method as i32`) → `AndroidPtt` → JNI → Kotlin `UsbPttAdapter.pttSet`. `method=="android"` is only the coarse subsystem discriminator. **`gpio_pin` is the CM108 HID pin and nothing else** — it must never carry the Android transport (an earlier build did, via a `method=="android"` sentinel, which silently downgraded saved AIOC configs to CP2102N on re-save when a response DTO dropped the field; removed by migration v22 `ptt_android_method_field`).
 
-Source: [`../../pkg/webapi/dto/channel.go`](../../pkg/webapi/dto/channel.go) (`ChannelPtt.GpioPin`, `ChannelPttFromModel`);
-[`../../pkg/modembridge/session.go`](../../pkg/modembridge/session.go) (`gpioPin` zeroed only for `method=="gpio"`);
+Source: [`../../pkg/webapi/dto/channel.go`](../../pkg/webapi/dto/channel.go) (`ChannelPtt.PttMethod`, `ChannelPttFromModel`);
+[`../../pkg/configstore/migrate.go`](../../pkg/configstore/migrate.go) (`migratePttAndroidMethodField`, v22);
+[`../../pkg/modembridge/session.go`](../../pkg/modembridge/session.go) (`ConfigurePtt` construction, `PttMethod` field);
 [`../../graywolf-modem/src/tx/ptt.rs`](../../graywolf-modem/src/tx/ptt.rs) (`PttMethod::Android` arm);
 [`../../android/app/src/main/kotlin/com/nw5w/graywolf/usb/UsbPttAdapter.kt`](../../android/app/src/main/kotlin/com/nw5w/graywolf/usb/UsbPttAdapter.kt) (`pttSet`, `setAiocRts`).
 
