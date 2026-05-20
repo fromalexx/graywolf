@@ -35,7 +35,13 @@ class WebAppInterfaceTest {
         webView: WebView = mockWebView(),
         adapter: UsbPttAdapter = UsbPttAdapter,
         token: String = "tok",
-    ) = WebAppInterface(tokenProvider = { token }, webView = webView, adapter = adapter)
+        requestBtPermission: (String) -> Unit = {},
+    ) = WebAppInterface(
+        tokenProvider = { token },
+        webView = webView,
+        adapter = adapter,
+        requestBtPermission = requestBtPermission,
+    )
 
     // -----------------------------------------------------------------------
     // getBearerToken — unchanged from phase 3
@@ -159,6 +165,24 @@ class WebAppInterfaceTest {
 
         verify(adapter, never()).requestPermissionFor(any(), any(), any())
         verify(wv, never()).evaluateJavascript(any(), any())
+    }
+
+    // -----------------------------------------------------------------------
+    // requestBluetoothPermission — delegates to the injected lambda
+    // -----------------------------------------------------------------------
+    @Test
+    fun `requestBluetoothPermission with valid callbackId delegates to lambda`() {
+        val captured = mutableListOf<String>()
+        iface(requestBtPermission = { captured += it }).requestBluetoothPermission("bt-id-123")
+        assertEquals(listOf("bt-id-123"), captured)
+    }
+
+    @Test
+    fun `requestBluetoothPermission with malformed callbackId is rejected`() {
+        val captured = mutableListOf<String>()
+        iface(requestBtPermission = { captured += it })
+            .requestBluetoothPermission("foo'); alert(1)")
+        assertEquals(emptyList<String>(), captured)
     }
 
     // -----------------------------------------------------------------------

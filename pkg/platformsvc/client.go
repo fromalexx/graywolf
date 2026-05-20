@@ -2,7 +2,10 @@
 
 package platformsvc
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Client is the typed Go API consumed by pkg/gps/android.go,
 // pkg/pttdevice/android.go, and the modembridge PTT relay (phases 4-5).
@@ -20,6 +23,15 @@ type Client interface {
 	SelectUsbDevice(ctx context.Context, vid, pid uint16) (*UsbHandle, error)
 	KeyPtt(ctx context.Context, method PttMethod, handle *UsbHandle) (*PttAck, error)
 	UnkeyPtt(ctx context.Context, method PttMethod, handle *UsbHandle) (*PttAck, error)
+	// BondedBtDevices enumerates the currently-bonded Bluetooth devices on
+	// the Android side. One-shot request/response; safe to call repeatedly.
+	BondedBtDevices(ctx context.Context) ([]BondedBtDevice, error)
+	// BtSerialOpen opens an RFCOMM SPP stream to the bonded device at mac
+	// and returns a multiplexed io.ReadWriteCloser. Multiple handles may
+	// be open concurrently; each is routed independently by the dispatch
+	// layer. Close on the returned handle sends a final SerialClose to the
+	// server and unregisters the handle.
+	BtSerialOpen(ctx context.Context, mac string) (io.ReadWriteCloser, error)
 	Close() error
 }
 

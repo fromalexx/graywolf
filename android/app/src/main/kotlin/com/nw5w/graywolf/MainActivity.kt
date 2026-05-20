@@ -19,12 +19,17 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.nw5w.graywolf.webview.WebAppInterface
+import com.nw5w.graywolf.webview.WebBridgeIds
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
     private val mainHandler = Handler(Looper.getMainLooper())
     private var didReloadOnError = false
     private var batteryOptIntentChecked = false
+    // Pending JS callback id for an in-flight BLUETOOTH_CONNECT permission
+    // request. Cleared in onRequestPermissionsResult after we post the
+    // window.__btResult dispatch back to the WebView.
+    private var pendingBtPermCallback: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +54,7 @@ class MainActivity : Activity() {
                 WebAppInterface(
                     tokenProvider = { (application as GraywolfApp).bearerToken },
                     webView = it,
+                    requestBtPermission = ::requestBluetoothPermission,
                 ),
                 "GraywolfWebInterface",
             )
@@ -87,7 +93,71 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_PERMS) startEverything()
+        if (requestCode == REQ_PERMS) {
+            startEverything()
+            return
+        }
+        if (requestCode == REQ_BT_PERMS) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            val callbackId = pendingBtPermCallback
+            pendingBtPermCallback = null
+            if (callbackId != null) postBtResult(callbackId, granted)
+        }
+    }
+
+    /**
+     * Request the BLUETOOTH_CONNECT runtime permission and report the result
+     * back to the WebView via window.__btResult(callbackId, granted).
+     *
+     * On API <31 the permission is install-time (the legacy BLUETOOTH /
+     * BLUETOOTH_ADMIN entries in the manifest cover us) so we resolve the
+     * callback immediately with granted=true.
+     *
+     * If the permission is already granted, we likewise short-circuit.
+     *
+     * Otherwise we store the callbackId, fire requestPermissions(), and let
+     * onRequestPermissionsResult() post the result.
+     */
+    fun requestBluetoothPermission(callbackId: String) {
+        if (!WebBridgeIds.CALLBACK_ID_RE.matches(callbackId)) {
+            Log.w(TAG, "rejected invalid bt callbackId: $callbackId")
+            return
+        }
+        // requestPermissions() is documented to run on the main thread, and
+        // pendingBtPermCallback is read on the main thread by
+        // onRequestPermissionsResult. @JavascriptInterface methods are invoked
+        // on the WebView binder thread, so hop to the main looper before
+        // touching either. The postBtResult short-circuits already target the
+        // main thread via webView.post inside postBtResult.
+        mainHandler.post {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                // API <31: legacy BLUETOOTH / BLUETOOTH_ADMIN are install-time.
+                postBtResult(callbackId, true)
+                return@post
+            }
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                postBtResult(callbackId, true)
+                return@post
+            }
+            pendingBtPermCallback = callbackId
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BT_PERMS)
+        }
+    }
+
+    // Dispatch the BT permission result back into the SPA. callbackId is
+    // re-validated against CALLBACK_ID_RE before JS interpolation so a
+    // malformed value can't escape the string literal.
+    private fun postBtResult(callbackId: String, granted: Boolean) {
+        if (!WebBridgeIds.CALLBACK_ID_RE.matches(callbackId)) {
+            Log.w(TAG, "refusing to post bt result for invalid callbackId: $callbackId")
+            return
+        }
+        webView.post {
+            val script = "window.__btResult && window.__btResult('$callbackId', $granted)"
+            Log.d(TAG, "btResult callbackId=$callbackId granted=$granted")
+            webView.evaluateJavascript(script, null)
+        }
     }
 
     private fun startEverything() {
@@ -142,6 +212,10 @@ class MainActivity : Activity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REQ_PERMS = 0x101
+        // Distinct request code for BLUETOOTH_CONNECT runtime permission so
+        // onRequestPermissionsResult can route the result to the SPA's
+        // pending callback instead of the startup-perms code path.
+        private const val REQ_BT_PERMS = 0x102
         private const val PREFS_NAME = "graywolf-prefs"
         private const val PREF_BATTERY_OPT_REQUESTED = "battery_opt_whitelist_requested_v1"
 

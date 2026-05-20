@@ -75,12 +75,13 @@ const (
 
 // KISS interfaces resource — /api/kiss (Phase 2).
 const (
-	OpListKiss      = "listKiss"
-	OpCreateKiss    = "createKiss"
-	OpGetKiss       = "getKiss"
-	OpUpdateKiss    = "updateKiss"
-	OpDeleteKiss    = "deleteKiss"
-	OpReconnectKiss = "reconnectKiss"
+	OpListKiss           = "listKiss"
+	OpCreateKiss         = "createKiss"
+	OpGetKiss            = "getKiss"
+	OpUpdateKiss         = "updateKiss"
+	OpDeleteKiss         = "deleteKiss"
+	OpReconnectKiss      = "reconnectKiss"
+	OpGetBondedBtDevices = "getBondedBtDevices"
 )
 
 // Tx-timing resource — /api/tx-timing (Phase 2). Keyed by channel id,

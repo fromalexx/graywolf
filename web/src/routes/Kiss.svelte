@@ -1,7 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { Button, Input, Select, Badge, Checkbox } from '@chrissnell/chonky-ui';
-  import { api } from '../lib/api.js';
+  import { api, kissBt } from '../lib/api.js';
+  import { Platform } from '../lib/platform.js';
   import { toasts } from '../lib/stores.js';
   import PageHeader from '../components/PageHeader.svelte';
   import DataTable from '../components/DataTable.svelte';
@@ -77,11 +78,87 @@
     { key: 'status', label: 'Status' },
   ];
 
-  const typeOptions = [
-    { value: 'tcp', label: 'TCP (server)' },
+  // Platform-conditional type menu. On Android, operators see only
+  // the two interface types we actually support there: Bluetooth
+  // (serial-over-RFCOMM to a paired TNC) and TCP-Client (which we
+  // relabel "Network" because that's the term Android operators
+  // expect). Desktop keeps the full set including server-listen TCP
+  // and host-serial. Platform.isAndroid is read reactively so the
+  // menu re-derives if the JS bridge appears/disappears mid-session
+  // (rare, but the reactive shape costs us nothing).
+  const desktopTypeOptions = [
+    { value: 'tcp',        label: 'TCP (server)' },
     { value: 'tcp-client', label: 'TCP Client' },
-    { value: 'serial', label: 'Serial' },
+    { value: 'serial',     label: 'Serial' },
   ];
+  const androidTypeOptions = [
+    { value: 'bluetooth',  label: 'Bluetooth Serial' },
+    { value: 'tcp-client', label: 'Network' },
+  ];
+  let typeOptions = $derived(Platform.isAndroid ? androidTypeOptions : desktopTypeOptions);
+
+  // Bonded Bluetooth devices, fetched lazily the first time the
+  // operator switches the type select to "bluetooth" with the modal
+  // open. Refreshable via the Refresh button next to the picker.
+  let bondedDevices = $state([]);
+  let bondedLoading = $state(false);
+  let bondedError = $state('');
+  // Inline save-time validation error. Surfaced via the bonded-device
+  // FormField's `error` prop alongside any network error from the
+  // lazy loader. Cleared whenever the operator picks a device or the
+  // modal reopens.
+  let saveError = $state('');
+
+  // Derived <Select> options for the bonded-device picker. chonky-ui's
+  // Select doesn't honor `disabled` on individual options (it only
+  // propagates value+label), so we don't ship a fake placeholder
+  // entry — the Select's own `placeholder` prop handles the empty
+  // state correctly. handleSave() guards against submitting an empty
+  // serial_device for bluetooth interfaces.
+  let bondedDeviceOptions = $derived(
+    bondedDevices.map((d) => ({
+      value: d.mac,
+      label: `${d.name} (${d.mac})`,
+    })),
+  );
+
+  // Combined error surfaced on the bonded-device FormField. Save-time
+  // validation takes precedence over the network/loader error, since
+  // the operator just acted and that's the more relevant signal.
+  let bondedFieldError = $derived(saveError || bondedError);
+
+  // Hint text for the bonded-device FormField. When the list is empty
+  // and nothing is loading or errored, surface the "pair in Android
+  // Settings first" guidance through the FormField's hint slot so it
+  // gets a stable id and is wired into aria-describedby on the Select.
+  //
+  // Phase 6 (Option A scope): an empty list is also what we see when
+  // BLUETOOTH_CONNECT was denied — BluetoothAdapter.bondedDevices
+  // raises a SecurityException which BtSerialAdapter swallows into an
+  // empty list. The two states are indistinguishable here, so the
+  // empty-list copy nudges the operator toward the "Grant Bluetooth
+  // permission" button rendered below the picker. A cleaner fix (a
+  // distinct permission_denied flag on the proto response) is deferred
+  // as a future enhancement; the empty-list-with-grant-button UX is
+  // good enough for v1.
+  let bondedHint = $derived(
+    !bondedLoading && !bondedError && bondedDevices.length === 0
+      ? 'No paired Bluetooth devices found. Pair your TNC in Android Settings → Bluetooth, then click Refresh. If you have already paired the TNC but no devices appear, grant Bluetooth permission below.'
+      : 'Pair the TNC in Android Settings → Bluetooth first, then refresh.',
+  );
+
+  // True when the bonded list is empty and we have nothing else to
+  // explain it — gate for the "Grant Bluetooth permission" button.
+  // Android-only; on desktop the bondedError already says "Bluetooth
+  // interfaces can only be configured from the Android app." so we
+  // skip the button there.
+  let showBtPermGrant = $derived(
+    Platform.isAndroid &&
+      form.type === 'bluetooth' &&
+      !bondedLoading &&
+      !bondedError &&
+      bondedDevices.length === 0,
+  );
 
   const modeOptions = [
     { value: 'modem', label: 'Modem' },
@@ -150,6 +227,12 @@
     clockTimer = setInterval(() => {
       clockTick = (clockTick + 1) % CLOCK_TICK_MOD;
     }, CLOCK_TICK_MS);
+    // Pre-warm the bonded list on Android so the table can show
+    // friendly names for Bluetooth rows immediately on first paint.
+    // Uses a silent fetch — if it fails we just fall back to bare
+    // MACs in the table, and the operator will see the real error
+    // when they open the modal and trigger the lazy loader there.
+    if (Platform.isAndroid) prewarmBondedDevices();
   });
 
   onDestroy(() => {
@@ -160,6 +243,15 @@
   function openCreate() {
     editing = null;
     form = emptyForm();
+    // The Type select only shows {bluetooth, tcp-client} on Android —
+    // the default `tcp` from emptyForm() would render an invisible
+    // selection and silently submit a server-listen interface if the
+    // operator never touched the field. Pick a visible default for
+    // the platform's actual menu.
+    if (Platform.isAndroid) {
+      form.type = 'bluetooth';
+    }
+    saveError = '';
     // Default AllowTxFromGovernor=true for new tcp-client rows per
     // plan D4. When the operator flips to tcp-client we pre-check
     // the governor-TX checkbox so the common case (outbound TNC for
@@ -169,6 +261,7 @@
 
   function openEdit(row) {
     editing = row;
+    saveError = '';
     form = {
       ...row,
       tcp_port: String(row.tcp_port ?? ''),
@@ -198,6 +291,131 @@
       form._clientDefaultsApplied = true;
     }
   });
+
+  // Phase 5: Bluetooth-typed interfaces are always TNCs (the paired
+  // device IS the modem). Force Mode=tnc whenever the operator flips
+  // type to bluetooth so the Mode-gated UI (rate/burst, governor-TX
+  // checkbox) renders, and so buildPayload() doesn't try to send
+  // mode=modem to a server that would reject it.
+  $effect(() => {
+    if (form.type === 'bluetooth' && form.mode !== 'tnc') {
+      form.mode = 'tnc';
+    }
+  });
+
+  // Lazy-load bonded devices the first time the operator opens the
+  // modal AND selects bluetooth. Re-runs only when the gate
+  // conditions flip back to satisfied — operator can clear an error
+  // and click Refresh to retry without remounting. Gated on
+  // Platform.isAndroid: on desktop the GET returns 501 by design, so
+  // we short-circuit with a friendly message instead of letting the
+  // operator stare at "HTTP 501".
+  $effect(() => {
+    if (form.type !== 'bluetooth' || !modalOpen) return;
+    if (!Platform.isAndroid) {
+      if (!bondedError) {
+        bondedError = 'Bluetooth interfaces can only be configured from the Android app.';
+      }
+      return;
+    }
+    if (bondedDevices.length === 0 && !bondedLoading && !bondedError) {
+      loadBondedDevices();
+    }
+  });
+
+  async function loadBondedDevices() {
+    bondedLoading = true;
+    bondedError = '';
+    try {
+      const resp = await kissBt.bondedDevices();
+      bondedDevices = resp?.devices ?? [];
+    } catch (err) {
+      bondedError = err?.message ?? 'Failed to load Bluetooth devices';
+    } finally {
+      bondedLoading = false;
+    }
+  }
+
+  // Phase 6 (Option A scope): prompt the operator to grant
+  // BLUETOOTH_CONNECT via the Android JS bridge, then re-poll the
+  // bonded-device list on success. The lambda is wired through
+  // MainActivity (which owns requestPermissions()); the WebAppInterface
+  // method exists only on Android, so the optional-chain on
+  // window.GraywolfWebInterface is the desktop guard.
+  //
+  // window.__btResult is wired up BEFORE invoking the bridge so a
+  // synchronous already-granted reply (API <31 or permission already
+  // granted) can't race past us. The dispatcher is one-shot: it only
+  // re-loads the bonded list when the id matches; other in-flight ids
+  // are ignored (none today, but defensive against a future caller).
+  //
+  // NOTE: A "Bond lost" UI state (the supervisor reports an
+  // ex-bonded device went Unpaired) is intentionally NOT plumbed here.
+  // That would require a new state on the backend response and a
+  // signal up through the supervisor; it's deferred as a future
+  // enhancement.
+  function requestBtPerm() {
+    if (!Platform.isAndroid) return;
+    if (!globalThis.GraywolfWebInterface?.requestBluetoothPermission) return;
+    // Prefix guarantees a non-empty alphanumeric id even if Math.random()
+    // returns 0 — matches the existing USB-grant pattern in AndroidPttFields.
+    const callbackId = 'bt-' + Math.random().toString(36).slice(2);
+    const prev = globalThis.__btResult;
+    globalThis.__btResult = (id, granted) => {
+      if (id !== callbackId) return;
+      // One-shot: restore (or clear) the previous handler so a stale
+      // callback fired after we tear down can't refire loadBondedDevices.
+      if (prev) globalThis.__btResult = prev;
+      else delete globalThis.__btResult;
+      if (granted) loadBondedDevices();
+    };
+    try {
+      globalThis.GraywolfWebInterface.requestBluetoothPermission(callbackId);
+    } catch (err) {
+      console.error('requestBluetoothPermission failed:', err);
+      // Roll back the dispatcher swap so a later callback for a
+      // different id isn't dropped on the floor.
+      if (prev) globalThis.__btResult = prev;
+      else delete globalThis.__btResult;
+    }
+  }
+
+  // Silent background fetch used only to pre-populate friendly names
+  // in the table. Failures are intentionally not surfaced — the modal
+  // path (loadBondedDevices) is the one that reports errors to the
+  // operator when it's actionable.
+  async function prewarmBondedDevices() {
+    try {
+      const resp = await kissBt.bondedDevices();
+      if (Array.isArray(resp?.devices)) bondedDevices = resp.devices;
+    } catch {
+      /* swallow — falls back to bare MACs in the table */
+    }
+  }
+
+  // Auto-fill a friendly slug name when the operator picks a bonded
+  // device. Only overwrites empty names or names that look like a
+  // previous auto-fill (kiss-bt-*) so manually-named interfaces are
+  // preserved on re-pick. The form/DTO doesn't model a name field
+  // today, but interfaces carry .name server-side (used in the
+  // NeedsReconfig banner); leaving the helper in place means a
+  // future name input wires up for free.
+  function autofillBtName() {
+    if (!form.serial_device) return;
+    // Operator just picked a device — clear any "pick a device first"
+    // validation error so it doesn't linger as visual noise.
+    saveError = '';
+    const d = bondedDevices.find((x) => x.mac === form.serial_device);
+    if (!d) return;
+    const slug = d.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    const autoName = `kiss-bt-${slug}`;
+    if (!form.name || (typeof form.name === 'string' && form.name.startsWith('kiss-bt-'))) {
+      form.name = autoName;
+    }
+  }
 
   function buildPayload() {
     const data = {
@@ -249,6 +467,17 @@
   }
 
   function handleSave() {
+    // Client-side guard: chonky-ui's Select doesn't honor per-option
+    // `disabled`, so without this check an operator could leave the
+    // bonded-device picker at its empty placeholder and submit a
+    // bluetooth interface with serial_device=''. The server would
+    // accept it and the supervisor would fail to dial later. Catch
+    // it here and surface the error inline on the FormField.
+    if (form.type === 'bluetooth' && !form.serial_device) {
+      saveError = 'Pick a bonded device before saving.';
+      return;
+    }
+    saveError = '';
     // Mode changes on an existing interface take effect the instant the
     // server restarts the per-interface KISS server — connected peers see
     // routing behavior flip under them. Make the operator confirm it.
@@ -260,6 +489,36 @@
     commitSave();
   }
 
+  // labelForType maps the stored interface-type discriminator to the
+  // operator-facing label. The tcp-client relabel to "Network" on
+  // Android mirrors typeOptions so the modal and the table stay in
+  // sync. Falls through to the raw type for forward-compat with any
+  // server-side type we don't recognize yet.
+  function labelForType(t) {
+    switch (t) {
+      case 'tcp':        return 'TCP (server)';
+      case 'tcp-client': return Platform.isAndroid ? 'Network' : 'TCP Client';
+      case 'serial':     return 'Serial';
+      case 'bluetooth':  return 'Bluetooth Serial';
+      default:           return t;
+    }
+  }
+
+  // friendlyDevice returns a human-readable endpoint string for the
+  // interface row. For bluetooth rows we cross-reference the cached
+  // bondedDevices list (populated when the modal was open) so the
+  // operator sees "Mobilinkd TNC3 (AA:BB:...)" instead of a bare MAC.
+  // Falls back to the bare device id when we don't have a name yet
+  // (e.g. table rendered before the modal has ever been opened).
+  function friendlyDevice(iface) {
+    const dev = iface.device || iface.serial_device || '';
+    if (iface.type !== 'bluetooth') return dev;
+    const match = bondedDevices.find(
+      (d) => d.mac === iface.device || d.mac === iface.serial_device,
+    );
+    return match ? `${match.name} (${dev})` : dev;
+  }
+
   function describeRow(row) {
     const mode = modeLabels[row.mode] || 'Modem';
     if (row.type === 'tcp') return `TCP server on port ${row.tcp_port}, ${mode}`;
@@ -268,6 +527,10 @@
       const dev = (row.serial_device || '').trim();
       return dev ? `serial ${dev}, ${mode}` : `serial, ${mode}`;
     }
+    if (row.type === 'bluetooth') {
+      const dev = friendlyDevice(row);
+      return dev ? `bluetooth ${dev}, ${mode}` : `bluetooth, ${mode}`;
+    }
     return `#${row.id}, ${mode}`;
   }
 
@@ -275,6 +538,7 @@
     if (row.type === 'tcp') return `:${row.tcp_port}`;
     if (row.type === 'tcp-client') return `${row.remote_host}:${row.remote_port}`;
     if (row.type === 'serial') return row.serial_device || '—';
+    if (row.type === 'bluetooth') return friendlyDevice(row) || '—';
     return '—';
   }
 
@@ -370,11 +634,13 @@
 
 {#snippet typeCell(value, _row)}
   {#if value === 'tcp-client'}
-    <Badge variant="info">TCP Client</Badge>
+    <Badge variant="info">{labelForType(value)}</Badge>
   {:else if value === 'tcp'}
     <Badge>TCP Server</Badge>
+  {:else if value === 'bluetooth'}
+    <Badge variant="info">{labelForType(value)}</Badge>
   {:else if value === 'serial'}
-    <Badge>Serial</Badge>
+    <Badge>{labelForType(value)}</Badge>
   {:else}
     <Badge>{value || '—'}</Badge>
   {/if}
@@ -419,6 +685,8 @@
           {/if}
         {:else if row.type === 'tcp'}
           <div class="detail-row"><span class="detail-label">Listening:</span> <span>:{row.tcp_port}</span></div>
+        {:else if row.type === 'bluetooth'}
+          <div class="detail-row"><span class="detail-label">Device:</span> <span>{friendlyDevice(row) || '—'}</span></div>
         {:else}
           <div class="detail-row"><span class="detail-label">Device:</span> <span>{row.serial_device || '—'}</span></div>
         {/if}
@@ -428,11 +696,13 @@
 {/snippet}
 
 <Modal bind:open={modalOpen} title={editing ? 'Edit KISS' : 'New KISS Interface'}>
-    <FormField label="Mode" id="kiss-mode" hint={modeHint}>
-      {#snippet children(describedBy)}
-        <Select id="kiss-mode" bind:value={form.mode} options={modeOptions} aria-describedby={describedBy} />
-      {/snippet}
-    </FormField>
+    {#if form.type !== 'bluetooth'}
+      <FormField label="Mode" id="kiss-mode" hint={modeHint}>
+        {#snippet children(describedBy)}
+          <Select id="kiss-mode" bind:value={form.mode} options={modeOptions} aria-describedby={describedBy} />
+        {/snippet}
+      </FormField>
+    {/if}
     <FormField label="Type" id="kiss-type">
       <Select id="kiss-type" bind:value={form.type} options={typeOptions} />
     </FormField>
@@ -455,7 +725,44 @@
       >
         <Input id="kiss-remote-port" bind:value={form.remote_port} type="number" min={1} max={65535} placeholder="8001" />
       </FormField>
-    {:else}
+    {:else if form.type === 'bluetooth'}
+      <FormField
+        label="Bonded device"
+        id="kiss-bt-device"
+        hint={bondedHint}
+        error={bondedFieldError}
+      >
+        {#snippet children(describedBy)}
+          <div class="bt-picker">
+            <Select
+              id="kiss-bt-device"
+              bind:value={form.serial_device}
+              options={bondedDeviceOptions}
+              placeholder={bondedLoading ? 'Loading…' : 'Select a bonded device'}
+              onValueChange={autofillBtName}
+              aria-describedby={describedBy}
+            />
+            <Button variant="secondary" onclick={loadBondedDevices} disabled={bondedLoading}>
+              Refresh
+            </Button>
+          </div>
+          {#if showBtPermGrant}
+            <!-- Phase 6 (Option A): the supervisor returns an empty
+                 bonded list both when nothing is paired AND when
+                 BLUETOOTH_CONNECT was denied (the SecurityException is
+                 swallowed in BtSerialAdapter). The grant button is
+                 Android-only and lets the operator fire the runtime
+                 permission dialog without bouncing through system
+                 Settings. -->
+            <div class="bt-perm-row">
+              <Button variant="secondary" onclick={requestBtPerm}>
+                Grant Bluetooth permission
+              </Button>
+            </div>
+          {/if}
+        {/snippet}
+      </FormField>
+    {:else if form.type === 'serial'}
       <FormField
         label="Serial Device"
         id="kiss-serial"
@@ -664,5 +971,26 @@
     font-size: 16px;
     color: var(--color-warning, #d4a72c);
     flex-shrink: 0;
+  }
+  /* Bluetooth bonded-device picker: Select + Refresh button on one
+     row. chonky inputs ship margin-bottom:1rem which shifts the
+     button down inside a flex row — override locally per the project
+     convention (see feedback_chonky_input_alignment in memory). */
+  .bt-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .bt-picker :global(select),
+  .bt-picker :global(input) {
+    margin: 0 !important;
+    flex: 1 1 auto;
+  }
+  /* Grant-permission button row sits below the bt-picker; the small
+     top margin separates it from the picker without making the
+     control feel detached from the FormField. */
+  .bt-perm-row {
+    margin-top: 8px;
+    display: flex;
   }
 </style>

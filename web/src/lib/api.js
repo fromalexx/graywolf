@@ -67,6 +67,18 @@ export const api = {
   delete: (path) => request('DELETE', path),
 };
 
+// kissBt groups the KISS-over-Bluetooth helpers. Today there's only
+// the bonded-device list (Android-only; returns 501 on desktop), but
+// future endpoints in the same family (pair / unpair / probe) should
+// land here too.
+export const kissBt = {
+  // bondedDevices fetches the list of Android-paired Bluetooth devices
+  // suitable for a KISS interface. Shape: { devices: [{mac, name}] }.
+  // Returns 501 on desktop hosts; callers should surface a friendly
+  // message in that case.
+  bondedDevices: () => api.get('/kiss/bonded-bt-devices'),
+};
+
 // --- Mock data for development without backend ---
 
 function delay(data) {
@@ -99,6 +111,13 @@ const mockPttAvailable = [
 const mockKiss = [
   { id: 1, type: 'tcp', tcp_port: 8001, serial_device: '', baud_rate: 0 },
 ];
+
+const mockBondedBtDevices = {
+  devices: [
+    { mac: '00:11:22:33:44:55', name: 'Mobilinkd TNC3' },
+    { mac: 'AA:BB:CC:DD:EE:FF', name: 'Kenwood TH-D74' },
+  ],
+};
 
 const mockAgw = { tcp_port: 8000, monitor_port: 8002, enabled: true };
 
@@ -185,6 +204,7 @@ function getMockData(method, path, body) {
   if (path === '/kiss' && method === 'POST') return delay({ id: 2, ...body });
   if (path.match(/^\/kiss\/\d+$/) && method === 'PUT') return delay(body);
   if (path.match(/^\/kiss\/\d+$/) && method === 'DELETE') return delay(null);
+  if (path === '/kiss/bonded-bt-devices' && method === 'GET') return delay(mockBondedBtDevices);
 
   // AGW
   if (path === '/agw' && method === 'GET') return delay(mockAgw);

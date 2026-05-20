@@ -14,6 +14,11 @@ import (
 func (s *Server) registerKiss(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/kiss", s.listKiss)
 	mux.HandleFunc("POST /api/kiss", s.createKiss)
+	// Static segment before /{id} so the mux routes
+	// /api/kiss/bonded-bt-devices to handleGetBondedBtDevices rather than
+	// the {id} path. Go 1.22+ patterns prefer literal-over-wildcard
+	// already, but listing the literal first makes intent obvious.
+	mux.HandleFunc("GET /api/kiss/bonded-bt-devices", s.handleGetBondedBtDevices)
 	mux.HandleFunc("GET /api/kiss/{id}", s.getKiss)
 	mux.HandleFunc("PUT /api/kiss/{id}", s.updateKiss)
 	mux.HandleFunc("DELETE /api/kiss/{id}", s.deleteKiss)

@@ -28,6 +28,13 @@ message PlatformMessage {
     AudioRouteChanged audio_route_changed = 15;
     Error error = 16;
     GnssStatusUpdate gnss_status = 17;  // server → client; pushed alongside GpsFix
+    SerialOpen serial_open = 18;
+    SerialOpenAck serial_open_ack = 19;
+    SerialData serial_data = 20;
+    SerialClose serial_close = 21;
+    SerialError serial_error = 22;
+    BondedBtDevicesRequest bonded_bt_devices_request = 23;
+    BondedBtDevicesResponse bonded_bt_devices_response = 24;
   }
 }
 
@@ -191,4 +198,51 @@ message GnssStatusUpdate {
   uint32 sats_in_view = 1;
   uint32 sats_used = 2;
   repeated SatInfo sats = 3;
+}
+
+// SerialKind classifies a transport-agnostic byte stream the platform
+// service is asked to open. Open-ended so a future USB-serial KISS path
+// can reuse the same SerialOpen/Data/Close family.
+enum SerialKind {
+  SERIAL_KIND_UNSPECIFIED = 0;
+  SERIAL_KIND_BLUETOOTH   = 1;
+  // SERIAL_KIND_USB reserved for future use.
+}
+
+message SerialOpen {
+  uint32     handle  = 1;
+  SerialKind kind    = 2;
+  string     address = 3;  // bluetooth: MAC ("AA:BB:CC:DD:EE:FF")
+}
+
+message SerialOpenAck {
+  uint32 handle = 1;
+  bool   ok     = 2;
+  string error  = 3;
+}
+
+message SerialData {
+  uint32 handle = 1;
+  bytes  data   = 2;
+}
+
+message SerialClose {
+  uint32 handle = 1;
+  string reason = 2;
+}
+
+message SerialError {
+  uint32 handle = 1;
+  string code   = 2;  // bond_lost | permission_denied | rfcomm_closed | io_error | not_bonded
+  string detail = 3;
+}
+
+message BondedBtDevicesRequest {}
+
+message BondedBtDevicesResponse {
+  message Device {
+    string mac  = 1;
+    string name = 2;
+  }
+  repeated Device devices = 1;
 }

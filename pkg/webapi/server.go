@@ -114,6 +114,12 @@ type Server struct {
 	// SetRemoteActions; nil until set, in which case the
 	// /api/remote-actions/* handlers return 503 via requireRemoteActions.
 	remoteActions *remoteactions.Service
+
+	// btSource enumerates bonded Bluetooth devices for
+	// GET /api/kiss/bonded-bt-devices. Wired post-construction via
+	// SetBtSource by pkg/app on Android builds; nil elsewhere, in which
+	// case the handler returns 501 Not Implemented.
+	btSource BondedBtDevicesSource
 }
 
 // ActionsService is the narrow surface the webapi handlers consume

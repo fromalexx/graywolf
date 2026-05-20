@@ -1228,6 +1228,12 @@ func (a *App) wireHTTP(ctx context.Context) error {
 	apiSrv.SetAX25Manager(a.ax25Mgr)
 	apiSrv.SetPacketLog(a.plog)
 
+	// Bluetooth bonded-devices source. Android returns a live adapter
+	// backed by the platformsvc client (see btsource_android.go);
+	// desktop builds return nil so GET /api/kiss/bonded-bt-devices
+	// responds 501 Not Implemented (see btsource_default.go).
+	apiSrv.SetBtSource(a.btSourceForWebapi())
+
 	// Actions service runs the listener-addressee reload + test-fire
 	// path the REST handlers reach for. Skipped when wireActions
 	// declined to construct one (e.g. headless RF-only mode without a
@@ -1742,10 +1748,33 @@ func (a *App) kissComponent() namedComponent {
 						TncIngressBurst:     ki.TncIngressBurst,
 						AllowTxFromGovernor: ki.AllowTxFromGovernor,
 						OnReload:            a.notifyTxBackendReload,
+						OpenFunc:            a.kissSerialOpenFunc(),
+					})
+					continue
+				case configstore.KissTypeBluetooth:
+					// Bluetooth RFCOMM has no baud and the SPP TNC always
+					// owns the modem, so force BaudRate=0 and Mode=ModeTnc
+					// regardless of DTO input. The MAC lives in ki.Device.
+					if ki.Device == "" {
+						continue
+					}
+					a.kissMgr.StartSerial(ctx, ki.ID, kiss.SerialConfig{
+						Name:                name,
+						Device:              ki.Device,
+						BaudRate:            0,
+						Mode:                kiss.ModeTnc,
+						ChannelMap:          map[uint8]uint32{0: ch},
+						ReconnectInitMs:     ki.ReconnectInitMs,
+						ReconnectMaxMs:      ki.ReconnectMaxMs,
+						Logger:              a.logger,
+						TncIngressRateHz:    ki.TncIngressRateHz,
+						TncIngressBurst:     ki.TncIngressBurst,
+						AllowTxFromGovernor: ki.AllowTxFromGovernor,
+						OnReload:            a.notifyTxBackendReload,
+						OpenFunc:            a.kissSerialOpenFunc(),
 					})
 					continue
 				default:
-					// bluetooth not wired yet; skip.
 					continue
 				}
 				a.kissMgr.Start(ctx, ki.ID, kiss.ServerConfig{

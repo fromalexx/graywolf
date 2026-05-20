@@ -790,6 +790,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kiss/bonded-bt-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List bonded Bluetooth devices (Android only) */
+        get: operations["getBondedBtDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kiss/{id}": {
         parameters: {
             query?: never;
@@ -3132,6 +3149,13 @@ export interface components {
              *     UART, or a previously-running graywolf process).
              */
             used?: boolean;
+        };
+        "webapi.BondedBtDevice": {
+            mac?: string;
+            name?: string;
+        };
+        "webapi.BondedBtDevicesResponse": {
+            devices?: components["schemas"]["webapi.BondedBtDevice"][];
         };
         "webapi.ChannelReferrersResponse": {
             error?: string;
@@ -6338,6 +6362,44 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+        };
+    };
+    getBondedBtDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webapi.BondedBtDevicesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
