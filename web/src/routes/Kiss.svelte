@@ -131,10 +131,33 @@
   // and nothing is loading or errored, surface the "pair in Android
   // Settings first" guidance through the FormField's hint slot so it
   // gets a stable id and is wired into aria-describedby on the Select.
+  //
+  // Phase 6 (Option A scope): an empty list is also what we see when
+  // BLUETOOTH_CONNECT was denied — BluetoothAdapter.bondedDevices
+  // raises a SecurityException which BtSerialAdapter swallows into an
+  // empty list. The two states are indistinguishable here, so the
+  // empty-list copy nudges the operator toward the "Grant Bluetooth
+  // permission" button rendered below the picker. A cleaner fix (a
+  // distinct permission_denied flag on the proto response) is deferred
+  // as a future enhancement; the empty-list-with-grant-button UX is
+  // good enough for v1.
   let bondedHint = $derived(
     !bondedLoading && !bondedError && bondedDevices.length === 0
-      ? 'No paired Bluetooth devices found. Pair your TNC in Android Settings → Bluetooth, then click Refresh.'
+      ? 'No paired Bluetooth devices found. Pair your TNC in Android Settings → Bluetooth, then click Refresh. If you have already paired the TNC but no devices appear, grant Bluetooth permission below.'
       : 'Pair the TNC in Android Settings → Bluetooth first, then refresh.',
+  );
+
+  // True when the bonded list is empty and we have nothing else to
+  // explain it — gate for the "Grant Bluetooth permission" button.
+  // Android-only; on desktop the bondedError already says "Bluetooth
+  // interfaces can only be configured from the Android app." so we
+  // skip the button there.
+  let showBtPermGrant = $derived(
+    Platform.isAndroid &&
+      form.type === 'bluetooth' &&
+      !bondedLoading &&
+      !bondedError &&
+      bondedDevices.length === 0,
   );
 
   const modeOptions = [
@@ -310,6 +333,50 @@
       bondedError = err?.message ?? 'Failed to load Bluetooth devices';
     } finally {
       bondedLoading = false;
+    }
+  }
+
+  // Phase 6 (Option A scope): prompt the operator to grant
+  // BLUETOOTH_CONNECT via the Android JS bridge, then re-poll the
+  // bonded-device list on success. The lambda is wired through
+  // MainActivity (which owns requestPermissions()); the WebAppInterface
+  // method exists only on Android, so the optional-chain on
+  // window.GraywolfWebInterface is the desktop guard.
+  //
+  // window.__btResult is wired up BEFORE invoking the bridge so a
+  // synchronous already-granted reply (API <31 or permission already
+  // granted) can't race past us. The dispatcher is one-shot: it only
+  // re-loads the bonded list when the id matches; other in-flight ids
+  // are ignored (none today, but defensive against a future caller).
+  //
+  // NOTE: A "Bond lost" UI state (the supervisor reports an
+  // ex-bonded device went Unpaired) is intentionally NOT plumbed here.
+  // That would require a new state on the backend response and a
+  // signal up through the supervisor; it's deferred as a future
+  // enhancement.
+  function requestBtPerm() {
+    if (!Platform.isAndroid) return;
+    if (!globalThis.GraywolfWebInterface?.requestBluetoothPermission) return;
+    // Prefix guarantees a non-empty alphanumeric id even if Math.random()
+    // returns 0 — matches the existing USB-grant pattern in AndroidPttFields.
+    const callbackId = 'bt-' + Math.random().toString(36).slice(2);
+    const prev = globalThis.__btResult;
+    globalThis.__btResult = (id, granted) => {
+      if (id !== callbackId) return;
+      // One-shot: restore (or clear) the previous handler so a stale
+      // callback fired after we tear down can't refire loadBondedDevices.
+      if (prev) globalThis.__btResult = prev;
+      else delete globalThis.__btResult;
+      if (granted) loadBondedDevices();
+    };
+    try {
+      globalThis.GraywolfWebInterface.requestBluetoothPermission(callbackId);
+    } catch (err) {
+      console.error('requestBluetoothPermission failed:', err);
+      // Roll back the dispatcher swap so a later callback for a
+      // different id isn't dropped on the floor.
+      if (prev) globalThis.__btResult = prev;
+      else delete globalThis.__btResult;
     }
   }
 
@@ -679,6 +746,20 @@
               Refresh
             </Button>
           </div>
+          {#if showBtPermGrant}
+            <!-- Phase 6 (Option A): the supervisor returns an empty
+                 bonded list both when nothing is paired AND when
+                 BLUETOOTH_CONNECT was denied (the SecurityException is
+                 swallowed in BtSerialAdapter). The grant button is
+                 Android-only and lets the operator fire the runtime
+                 permission dialog without bouncing through system
+                 Settings. -->
+            <div class="bt-perm-row">
+              <Button variant="secondary" onclick={requestBtPerm}>
+                Grant Bluetooth permission
+              </Button>
+            </div>
+          {/if}
         {/snippet}
       </FormField>
     {:else if form.type === 'serial'}
@@ -904,5 +985,12 @@
   .bt-picker :global(input) {
     margin: 0 !important;
     flex: 1 1 auto;
+  }
+  /* Grant-permission button row sits below the bt-picker; the small
+     top margin separates it from the picker without making the
+     control feel detached from the FormField. */
+  .bt-perm-row {
+    margin-top: 8px;
+    display: flex;
   }
 </style>
