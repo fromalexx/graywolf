@@ -230,7 +230,7 @@ class GraywolfService : Service() {
         platformServer = PlatformServer(
             socketPath = platformSocketPath(),
             serverVersion = BuildConfig.VERSION_NAME,
-            schemaVersion = 1,
+            schemaVersion = 2,
         ).also { it.start() }
         gpsAdapter = GpsAdapter(this, platformServer!!).also { it.start() }
 

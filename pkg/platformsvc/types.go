@@ -9,8 +9,6 @@ import (
 	pb "github.com/chrissnell/graywolf/pkg/platformproto"
 )
 
-const SchemaVersion uint32 = 2
-
 type PttMethod = pb.PttMethod
 type UsbClass = pb.UsbClass
 type UsbDevice = pb.UsbDevice
