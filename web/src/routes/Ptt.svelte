@@ -10,6 +10,9 @@
   import { key as methodKey } from './ptt/MethodPicker.svelte';
   import { DESKTOP_METHODS } from './ptt/devices/methodOptions.desktop.js';
   import { createDesktopDeviceSource } from './ptt/devices/desktopDeviceSource.js';
+  import { Platform } from '../lib/platform.js';
+  import { ANDROID_METHODS } from './ptt/devices/methodOptions.android.js';
+  import { createAndroidDeviceSource } from './ptt/devices/androidDeviceSource.js';
   import {
     modemBackedChannels as computeModemBacked,
     channelsNeedingPtt as computeChannelsNeedingPtt,
@@ -31,8 +34,11 @@
   let dialogDeviceOpen = $state(false);
   let dialogMethodChosen = $state(null);   // method-option chosen from Dialog A
   let dialogContext = $state(null);        // { kind: 'add' | 'edit', item, channelId }
-  const deviceSource = createDesktopDeviceSource(api);
-  let methodOptionsForPlatform = $derived(DESKTOP_METHODS); // Phase 4 swaps in Android branch
+  let isAndroid = $derived(Platform.isAndroid);
+  let methodOptionsForPlatform = $derived(isAndroid ? ANDROID_METHODS : DESKTOP_METHODS);
+  let deviceSource = $derived(
+    isAndroid ? createAndroidDeviceSource(api) : createDesktopDeviceSource(api)
+  );
 
   // Method label lookup retained for PttCard rendering. Keep in sync with
   // DESKTOP_METHODS plus Android-only labels for items the operator may have
