@@ -10,10 +10,14 @@ import (
 
 // platformBtSource adapts the App's live platformsvc.Client to
 // webapi.BondedBtDevicesSource. The adapter reads a.platformClient on
-// each call rather than capturing it at construction time so a late
-// SetPlatformClient call (or a reconnect that swaps the underlying
-// client) is reflected immediately — matching the pattern used by the
-// other webapi setters wired in pkg/app/wiring.go.
+// each call (not at construction) so a future late SetPlatformClient
+// or reconnect-swap is reflected immediately. Today main_android.go
+// calls SetPlatformClient before a.Run so the difference is
+// theoretical — kissSerialOpenFunc in kiss_openfunc_android.go captures
+// the client once at construction and works fine — but the per-call
+// form keeps the door open for late-binding without surprising the
+// UI's polling loop, at no measurable cost (one pointer load per
+// /api/kiss/bonded-bt-devices request).
 type platformBtSource struct{ app *App }
 
 // BondedBtDevices forwards to the injected platformsvc client and

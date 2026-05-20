@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/chrissnell/graywolf/pkg/webtypes"
 )
 
 // fakeBtSource lets the bonded-BT handler tests control the source's
@@ -52,9 +54,9 @@ func TestGetBondedBtDevices_Android_ReturnsList(t *testing.T) {
 }
 
 // TestGetBondedBtDevices_NonAndroid_Returns501 verifies that desktop /
-// non-Android builds (no SetBtSource call) return 501 Not Implemented,
-// not a 500 with a nil-deref or an empty list that pretends Bluetooth is
-// supported.
+// non-Android builds (no SetBtSource call) return 501 Not Implemented
+// with a JSON webtypes.ErrorResponse body — not a 500 with a nil-deref
+// or an empty list that pretends Bluetooth is supported.
 func TestGetBondedBtDevices_NonAndroid_Returns501(t *testing.T) {
 	srv, _ := newTestServer(t) // no SetBtSource call
 	mux := http.NewServeMux()
@@ -67,10 +69,24 @@ func TestGetBondedBtDevices_NonAndroid_Returns501(t *testing.T) {
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected application/json content-type, got %q", ct)
+	}
+	var errResp webtypes.ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error body: %v body=%s", err, rec.Body)
+	}
+	if errResp.Error == "" {
+		t.Fatalf("expected non-empty error field in 501 body, got %s", rec.Body)
+	}
 }
 
 // TestGetBondedBtDevices_SourceError_Returns500 confirms that errors from
-// the source bubble up as 500 with the underlying error text appended.
+// the source bubble up as 500 with a JSON webtypes.ErrorResponse body.
+// internalError deliberately strips the raw error from the response (and
+// logs it server-side instead) to avoid leaking driver/stack strings to
+// callers, so we assert only that the body is JSON-shaped with a
+// non-empty sanitized error message.
 func TestGetBondedBtDevices_SourceError_Returns500(t *testing.T) {
 	srv, _ := newTestServer(t)
 	srv.SetBtSource(&fakeBtSource{err: errors.New("boom")})
@@ -84,8 +100,20 @@ func TestGetBondedBtDevices_SourceError_Returns500(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), "boom") {
-		t.Fatalf("expected error body to include source error, got %q", rec.Body.String())
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected application/json content-type, got %q", ct)
+	}
+	var errResp webtypes.ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal error body: %v body=%s", err, rec.Body)
+	}
+	if errResp.Error == "" {
+		t.Fatalf("expected non-empty error field in 500 body, got %s", rec.Body)
+	}
+	// internalError must NOT echo the raw underlying error to the client
+	// (it logs it server-side instead). Guard against accidental regression.
+	if strings.Contains(errResp.Error, "boom") {
+		t.Fatalf("500 body leaked raw source error: %q", errResp.Error)
 	}
 }
 

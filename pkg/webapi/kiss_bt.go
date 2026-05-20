@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/chrissnell/graywolf/pkg/webtypes"
 )
 
 // BondedBtDevice is the wire representation of a single bonded Bluetooth
@@ -53,12 +55,14 @@ func (s *Server) SetBtSource(src BondedBtDevicesSource) { s.btSource = src }
 // @Router   /kiss/bonded-bt-devices [get]
 func (s *Server) handleGetBondedBtDevices(w http.ResponseWriter, r *http.Request) {
 	if s.btSource == nil {
-		http.Error(w, "Bluetooth is only available on the Android platform service", http.StatusNotImplemented)
+		writeJSON(w, http.StatusNotImplemented, webtypes.ErrorResponse{
+			Error: "Bluetooth is only available on the Android platform service",
+		})
 		return
 	}
 	devs, err := s.btSource.BondedBtDevices(r.Context())
 	if err != nil {
-		http.Error(w, "failed to query bonded devices: "+err.Error(), http.StatusInternalServerError)
+		s.internalError(w, r, "list bonded bluetooth devices", err)
 		return
 	}
 	out := BondedBtDevicesResponse{Devices: devs}
