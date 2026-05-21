@@ -103,6 +103,13 @@ jobs:
           PKG_CONFIG_ALLOW_CROSS: '1'
           PKG_CONFIG_PATH_aarch64_unknown_linux_gnu: '/usr/lib/aarch64-linux-gnu/pkgconfig'
           PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf: '/usr/lib/arm-linux-gnueabihf/pkgconfig'
+          # hidapi crate's bundled-source cc-rs compile needs libudev.h.
+          # libudev-dev:<arch> installs the header at /usr/include/libudev.h
+          # (Multi-Arch: same), but the cross-compiler's sysroot doesn't
+          # include /usr/include by default. Add it via cc-rs's
+          # CFLAGS_<triple> env (underscores in the triple).
+          CFLAGS_aarch64_unknown_linux_gnu: '-I/usr/include'
+          CFLAGS_arm_unknown_linux_gnueabihf: '-I/usr/include'
         run: cross build --release --target ${{ matrix.target }} --bin graywolf-modem
 
       - name: Build with cargo
