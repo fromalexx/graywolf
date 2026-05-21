@@ -33,11 +33,11 @@
   let dialogDeviceOpen = $state(false);
   let dialogMethodChosen = $state(null);   // method-option chosen from Dialog A
   let dialogContext = $state(null);        // { kind: 'add' | 'edit', item, channelId }
-  let isAndroid = $derived(Platform.isAndroid);
-  let methodOptionsForPlatform = $derived(isAndroid ? ANDROID_METHODS : DESKTOP_METHODS);
-  let deviceSource = $derived(
-    isAndroid ? createAndroidDeviceSource(api) : createDesktopDeviceSource(api)
-  );
+  // Platform.isAndroid is a non-reactive getter, so these never change after
+  // mount — use const, not $derived (which would re-run on every dep cycle).
+  const isAndroid = Platform.isAndroid;
+  const methodOptionsForPlatform = isAndroid ? ANDROID_METHODS : DESKTOP_METHODS;
+  const deviceSource = isAndroid ? createAndroidDeviceSource(api) : createDesktopDeviceSource(api);
 
   // Method label lookup retained for PttCard rendering. Keep in sync with
   // DESKTOP_METHODS plus Android-only labels for items the operator may have
