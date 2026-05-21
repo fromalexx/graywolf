@@ -3,10 +3,33 @@ pre-build = [
     "dpkg --add-architecture arm64 && apt-get update && apt-get install -y libasound2-dev:arm64 libudev-dev:arm64 unzip && curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc && rm /tmp/protoc.zip",
 ]
 
+# Cross compilation of alsa-sys / udev needs pkg-config to look in the
+# target arch's multi-arch directory inside the container. The 0.13.6
+# release initially failed with "Package alsa was not found in the
+# pkg-config search path" because PKG_CONFIG_ALLOW_CROSS / PATH default
+# to unset and pkg-config-rs refuses cross lookups unless the operator
+# opts in. Passthrough lets release.yml supply both vars from the host
+# runner; the values themselves point at paths that exist inside the
+# container after the libasound2-dev:arm64 multi-arch install above.
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = [
+    "PKG_CONFIG_ALLOW_CROSS",
+    "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu",
+]
+
 # 32-bit ARMv6 hard-float for Raspbian on older Raspberry Pi (Pi 1, Pi 2,
 # original Pi Zero / Zero W). Cortex-A7 (Pi 2) is ARMv7 but runs ARMv6
 # binaries, so a single armv6 build covers all 32-bit Pi models.
 [target.arm-unknown-linux-gnueabihf]
 pre-build = [
     "dpkg --add-architecture armhf && apt-get update && apt-get install -y libasound2-dev:armhf libudev-dev:armhf unzip && curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc && rm /tmp/protoc.zip",
+]
+
+# Same pkg-config cross-lookup story as the aarch64 target above; see
+# the note there for context. armhf's multi-arch path differs only in
+# triple.
+[target.arm-unknown-linux-gnueabihf.env]
+passthrough = [
+    "PKG_CONFIG_ALLOW_CROSS",
+    "PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf",
 ]

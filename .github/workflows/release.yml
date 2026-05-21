@@ -91,6 +91,18 @@ jobs:
         env:
           GRAYWOLF_VERSION: ${{ steps.ver.outputs.version }}
           GRAYWOLF_GIT_COMMIT: ${{ steps.ver.outputs.commit }}
+          # alsa-sys + libudev-sys go through pkg-config. When the host
+          # arch != target arch, pkg-config-rs refuses to look anywhere
+          # unless PKG_CONFIG_ALLOW_CROSS=1 is set; the per-target
+          # PKG_CONFIG_PATH_<triple> var (note: underscores, NOT hyphens)
+          # then tells pkg-config which multi-arch lib dir holds the
+          # matching .pc files. The paths point inside the cross-rs
+          # container after Cross.toml's pre-build installs the :arm64
+          # or :armhf dev packages. v0.13.6 release initially failed
+          # here -- pre-existing infra trap, not a code regression.
+          PKG_CONFIG_ALLOW_CROSS: '1'
+          PKG_CONFIG_PATH_aarch64_unknown_linux_gnu: '/usr/lib/aarch64-linux-gnu/pkgconfig'
+          PKG_CONFIG_PATH_arm_unknown_linux_gnueabihf: '/usr/lib/arm-linux-gnueabihf/pkgconfig'
         run: cross build --release --target ${{ matrix.target }} --bin graywolf-modem
 
       - name: Build with cargo
