@@ -494,10 +494,11 @@ object UsbPttAdapter : UsbPttCallback {
                 false
             }
         }
-        if (attempted == false) {
-            // Re-enumerate so a still-attached CP2102N gets re-opened;
-            // caller (Test PTT) can retry on the next click.
-            Log.i(TAG, "setRts: scheduling re-enumeration after stale-handle failure")
+        // Re-enumerate when we either had no handle (hot-swap that never
+        // triggered our broadcast) or just released a stale one. Caller's
+        // next click drives the freshly-opened handle.
+        if (attempted != true) {
+            Log.i(TAG, "setRts: scheduling re-enumeration (handle was ${if (attempted == null) "absent" else "stale"})")
             try { enumerate() } catch (t: Throwable) { Log.w(TAG, "re-enumerate threw: $t") }
         }
         return attempted ?: false
@@ -524,8 +525,8 @@ object UsbPttAdapter : UsbPttCallback {
 
     private fun setHidGpio(state: Boolean): Boolean {
         val attempted = setHidGpioLocked(state)
-        if (attempted == false) {
-            Log.i(TAG, "setHidGpio: scheduling re-enumeration after stale-handle failure")
+        if (attempted != true) {
+            Log.i(TAG, "setHidGpio: scheduling re-enumeration (handle was ${if (attempted == null) "absent" else "stale"})")
             try { enumerate() } catch (t: Throwable) { Log.w(TAG, "re-enumerate threw: $t") }
         }
         return attempted ?: false
@@ -648,8 +649,8 @@ object UsbPttAdapter : UsbPttCallback {
                 false
             }
         }
-        if (attempted == false) {
-            Log.i(TAG, "setAiocRts: scheduling re-enumeration after stale-handle failure")
+        if (attempted != true) {
+            Log.i(TAG, "setAiocRts: scheduling re-enumeration (handle was ${if (attempted == null) "absent" else "stale"})")
             try { enumerate() } catch (t: Throwable) { Log.w(TAG, "re-enumerate threw: $t") }
         }
         return attempted ?: false
