@@ -73,13 +73,13 @@ object UsbPttAdapter : UsbPttCallback {
     // Open-state grouped into immutable handles so JS-thread reads of the
     // (connection, hidIface) pair never tear when the broadcast-receiver
     // thread swaps the handle. Single @Volatile pointer = atomic publish.
-    internal data class Cp2102nHandle(val device: UsbDevice, val port: UsbSerialPort)
+    internal data class Cp2102nHandle(val device: UsbDevice, val port: UsbSerialPort, val connection: UsbDeviceConnection)
     internal data class Cm108Handle(
         val device: UsbDevice,
         val connection: UsbDeviceConnection,
         val hidIface: Int,
     )
-    internal data class AiocHandle(val device: UsbDevice, val port: UsbSerialPort)
+    internal data class AiocHandle(val device: UsbDevice, val port: UsbSerialPort, val connection: UsbDeviceConnection)
 
     @Volatile internal var cp2102n: Cp2102nHandle? = null
     @Volatile internal var cm108: Cm108Handle? = null
@@ -287,6 +287,77 @@ object UsbPttAdapter : UsbPttCallback {
     }
 
     /**
+     * Probe each open handle by issuing a standard USB GET_STATUS control
+     * transfer. If the underlying device has been physically disconnected
+     * but we still hold the file descriptor, the controller returns < 0
+     * (or throws). On failure, close the handle so the kernel can finalize
+     * the disconnect and re-enumerate the bus position — necessary on
+     * controllers like MediaTek musb-hdrc that won't release a stale entry
+     * while a userspace fd is held open.
+     *
+     * Called before each UsbDeviceLister.list so the SPA's "Detect Devices"
+     * gesture (and dialog opens) refresh the kernel's view.
+     */
+    fun pruneStaleHandles() {
+        synchronized(cp2102nLock) {
+            cp2102n?.let { h ->
+                if (!isHandleAlive(h.connection)) {
+                    Log.i(TAG, "pruneStaleHandles: CP2102N at ${h.device.deviceName} is dead, releasing")
+                    try { h.port.close() } catch (_: Throwable) { /* dead */ }
+                    cp2102n = null
+                }
+            }
+        }
+        synchronized(cm108Lock) {
+            cm108?.let { h ->
+                if (!isHandleAlive(h.connection)) {
+                    Log.i(TAG, "pruneStaleHandles: CM108 at ${h.device.deviceName} is dead, releasing")
+                    try {
+                        val iface = (0 until h.device.interfaceCount)
+                            .map { h.device.getInterface(it) }
+                            .firstOrNull { it.id == h.hidIface }
+                        if (iface != null) h.connection.releaseInterface(iface)
+                        h.connection.close()
+                    } catch (_: Throwable) { /* dead */ }
+                    cm108 = null
+                }
+            }
+        }
+        synchronized(aiocLock) {
+            aioc?.let { h ->
+                if (!isHandleAlive(h.connection)) {
+                    Log.i(TAG, "pruneStaleHandles: AIOC at ${h.device.deviceName} is dead, releasing")
+                    try { h.port.close() } catch (_: Throwable) { /* dead */ }
+                    aioc = null
+                }
+            }
+        }
+    }
+
+    /**
+     * USB GET_STATUS(Device) — standard request that every live device
+     * answers in 2 bytes. A < 0 return (or thrown exception) means the
+     * device is gone from the bus but the kernel hasn't released our fd.
+     */
+    private fun isHandleAlive(conn: UsbDeviceConnection): Boolean {
+        val buf = ByteArray(2)
+        return try {
+            val rc = conn.controlTransfer(
+                /* requestType = */ 0x80,    // USB_TYPE_STANDARD | USB_DIR_IN | USB_RECIP_DEVICE
+                /* request     = */ 0x00,    // GET_STATUS
+                /* value       = */ 0,
+                /* index       = */ 0,
+                /* buffer      = */ buf,
+                /* length      = */ buf.size,
+                /* timeout_ms  = */ 100,
+            )
+            rc >= 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
      * Release any open handle whose deviceName matches the supplied device,
      * leaving the other transports untouched. Called from the DETACHED
      * hot-plug broadcast so a re-attach gets a fresh open instead of using
@@ -394,7 +465,7 @@ object UsbPttAdapter : UsbPttCallback {
             port.setParameters(9600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             Log.i(TAG, "openCp2102n: step=rts=false")
             port.rts = false
-            cp2102n = Cp2102nHandle(dev, port)
+            cp2102n = Cp2102nHandle(dev, port, conn)
             Log.i(TAG, "CP2102N opened ${dev.deviceName}")
         } catch (t: Throwable) {
             Log.e(TAG, "openCp2102n failed: $t")
@@ -615,7 +686,7 @@ object UsbPttAdapter : UsbPttCallback {
             Log.i(TAG, "openAioc: step=dtr=rts=false")
             port.dtr = false
             port.rts = false
-            aioc = AiocHandle(dev, port)
+            aioc = AiocHandle(dev, port, conn)
             Log.i(TAG, "AIOC opened ${dev.deviceName}")
         } catch (t: Throwable) {
             Log.e(TAG, "openAioc failed: $t")

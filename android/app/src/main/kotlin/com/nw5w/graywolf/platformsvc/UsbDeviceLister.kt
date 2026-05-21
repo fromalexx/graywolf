@@ -23,11 +23,21 @@ private const val TAG = "UsbDeviceLister"
  * level or on one of their interfaces.
  */
 internal object UsbDeviceLister {
-    fun list(usbManager: UsbManager?, classFilter: UsbClass): List<ProtoUsbDevice> {
+    fun list(
+        usbManager: UsbManager?,
+        classFilter: UsbClass,
+        beforeQuery: () -> Unit = {},
+    ): List<ProtoUsbDevice> {
         if (usbManager == null) {
             Log.w(TAG, "list called with null UsbManager; returning empty")
             return emptyList()
         }
+        // Hook for the caller to prune stale UsbDeviceConnection handles
+        // before we query the bus. On controllers like musb-hdrc the
+        // kernel won't release a device entry while a userspace fd is
+        // held open, so a probe-and-close pass here lets the device list
+        // reflect physical reality after a hot-swap.
+        try { beforeQuery() } catch (t: Throwable) { Log.w(TAG, "beforeQuery threw: $t") }
         val all = usbManager.deviceList.values.toList()
         Log.i(TAG, "list classFilter=$classFilter attached=${all.size}")
         val out = all.mapNotNull { dev ->

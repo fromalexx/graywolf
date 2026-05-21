@@ -303,7 +303,11 @@ class GraywolfService : Service() {
         // enumerate (vid/pid/product are exposed without grant); permission
         // is requested separately when the device is selected.
         platformServer!!.attachUsbDeviceLister { classFilter ->
-            UsbDeviceLister.list(getSystemService(UsbManager::class.java), classFilter)
+            UsbDeviceLister.list(
+                getSystemService(UsbManager::class.java),
+                classFilter,
+                beforeQuery = { UsbPttAdapter.pruneStaleHandles() },
+            )
         }
 
         if (!bootModem()) {
