@@ -4,6 +4,7 @@
   import Modal from '../../components/Modal.svelte';
   import FormField from '../../components/FormField.svelte';
   import { blankForm, rowToForm, formToPayload, validateForm } from '../../lib/channelForm.js';
+  import { Platform } from '../../lib/platform.js';
 
   let { open = $bindable(), editing, audioDevices, txTimings, onSave, onCancel } = $props();
 
@@ -53,9 +54,17 @@
           form = rowToForm(row, (txTimings || {})[row.id]);
           errors = {};
         } else {
-          // Create path: snapshot inputDevices once at open time.
+          // Create path: snapshot input/output devices once at open time.
+          // On Android the seeded Default Output mirrors the seeded
+          // Default Input, so auto-selecting it ships TX-ready channels
+          // and saves the operator a step. Desktop keeps the safer
+          // RX-only default since hosts typically expose many output
+          // devices and the operator should choose deliberately.
           const defaultInput = inputDevices.length > 0 ? String(inputDevices[0].id) : '0';
-          form = { ...blankForm(), input_device_id: defaultInput };
+          const defaultOutput = Platform.isAndroid && outputDevices.length > 0
+            ? String(outputDevices[0].id)
+            : '0';
+          form = { ...blankForm(), input_device_id: defaultInput, output_device_id: defaultOutput };
           errors = {};
         }
       });

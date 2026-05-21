@@ -1,4 +1,22 @@
 import com.google.protobuf.gradle.proto
+import java.util.Base64
+
+// Read version metadata from the repo-root VERSION file so Android stays
+// in sync with `make bump-point`/`bump-minor`. Format: "X.Y.Z" with an
+// optional "-pre" suffix that we drop for versionCode (Play needs a pure
+// integer) but keep for versionName.
+val graywolfVersionName: String = run {
+    val versionFile = rootProject.projectDir.parentFile.resolve("VERSION")
+    require(versionFile.exists()) { "VERSION file not found at ${versionFile.absolutePath}" }
+    versionFile.readText().trim()
+}
+val graywolfVersionCode: Int = run {
+    val core = graywolfVersionName.substringBefore('-')
+    val parts = core.split(".")
+    require(parts.size == 3) { "VERSION must be X.Y.Z; got '$graywolfVersionName'" }
+    val (major, minor, patch) = parts.map { it.toInt() }
+    major * 1_000_000 + minor * 10_000 + patch * 100
+}
 
 plugins {
     id("com.android.application")
@@ -8,14 +26,14 @@ plugins {
 
 android {
     namespace = "com.nw5w.graywolf"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.nw5w.graywolf"
         minSdk = 28
-        targetSdk = 34
-        versionCode = 1
-        versionName = "0.0.1-pocb"
+        targetSdk = 36
+        versionCode = graywolfVersionCode
+        versionName = graywolfVersionName
     }
 
     sourceSets {
@@ -50,13 +68,48 @@ android {
         jniLibs.useLegacyPackaging = true
     }
 
+    // Release signing reads from env vars so CI can inject secrets without
+    // a committed keystore. Local release builds: export GRAYWOLF_KEYSTORE_PATH
+    // + GRAYWOLF_KEYSTORE_PASSWORD before ./gradlew assembleRelease|bundleRelease.
+    // CI passes GRAYWOLF_KEYSTORE_BASE64 (decoded inline) instead.
+    val keystorePath = System.getenv("GRAYWOLF_KEYSTORE_PATH")
+    val keystoreBase64 = System.getenv("GRAYWOLF_KEYSTORE_BASE64")
+    val keystorePassword = System.getenv("GRAYWOLF_KEYSTORE_PASSWORD")
+    val keyAlias = System.getenv("GRAYWOLF_KEY_ALIAS") ?: "graywolf-upload"
+    val keyPassword = System.getenv("GRAYWOLF_KEY_PASSWORD") ?: keystorePassword
+
+    val resolvedKeystoreFile: java.io.File? = when {
+        keystorePath != null -> file(keystorePath)
+        keystoreBase64 != null -> {
+            val tmp = layout.buildDirectory.file("upload.keystore").get().asFile
+            tmp.parentFile.mkdirs()
+            tmp.writeBytes(Base64.getDecoder().decode(keystoreBase64))
+            tmp
+        }
+        else -> null
+    }
+
+    signingConfigs {
+        if (resolvedKeystoreFile != null && keystorePassword != null) {
+            create("release") {
+                storeFile = resolvedKeystoreFile
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword!!
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
-            // POC-B is debug-only; phase 6 wires release signing.
             isMinifyEnabled = false
+            // No keystore env -> leave signingConfig unset; assembleRelease
+            // emits an unsigned APK. PR-build CI never sees secrets and
+            // stays green; tag builds inject the keystore env to sign.
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
@@ -145,6 +198,28 @@ val goAbiMatrix = mapOf(
 // .so floor lines up with the AndroidManifest.
 val ndkCgoApi = 28
 
+// Build the SPA bundle (web/dist) via vite before goCrossCompile picks
+// it up for go:embed. web/dist is gitignored; without this task an APK
+// built from a clean checkout (or after web/src changes) silently ships
+// whatever the developer last vite-built. The login-screen-on-Android
+// regression triaged on 2026-05-21 was exactly that bug. Inputs cover
+// every file the SPA build reads; outputs are the dist directory.
+val webBuild by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the SPA bundle (web/dist) via vite. Required before goCrossCompile."
+    workingDir = repoRoot.resolve("web")
+    inputs.dir(repoRoot.resolve("web/src"))
+    inputs.dir(repoRoot.resolve("web/themes"))
+    inputs.dir(repoRoot.resolve("web/public"))
+    inputs.file(repoRoot.resolve("web/index.html"))
+    inputs.file(repoRoot.resolve("web/package.json"))
+    inputs.file(repoRoot.resolve("web/package-lock.json"))
+    inputs.file(repoRoot.resolve("web/vite.config.js"))
+    inputs.file(repoRoot.resolve("web/svelte.config.js"))
+    outputs.dir(repoRoot.resolve("web/dist"))
+    commandLine = listOf("npx", "vite", "build")
+}
+
 val goCrossCompile by tasks.registering {
     group = "build"
     description = "Cross-compile cmd/graywolf to libgraywolf.so for each Android ABI."
@@ -153,6 +228,10 @@ val goCrossCompile by tasks.registering {
 goAbiMatrix.forEach { (abi, info) ->
     val taskName = "goCrossCompile_$abi"
     val task = tasks.register<Exec>(taskName) {
+        // Ensure web/dist is fresh before Go embeds it. Without this
+        // dependency, a developer who edits web/src/ but forgets to
+        // run vite build ships a stale SPA bundle inside libgraywolf.so.
+        dependsOn(webBuild)
         group = "build"
         workingDir = repoRoot
         environment("GOOS", "android")
