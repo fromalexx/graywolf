@@ -2,6 +2,7 @@
 <script>
   import { Button, Badge } from '@chrissnell/chonky-ui';
   import { postChannelPtt } from '../../lib/api.js';
+  import { truncatePath } from './format.js';
 
   let {
     item,
@@ -31,10 +32,6 @@
     }
   }
 
-  function truncatePath(p, max = 40) {
-    if (!p || p.length <= max) return p || '—';
-    return '...' + p.slice(-(max - 3));
-  }
 </script>
 
 <div class="device-card">

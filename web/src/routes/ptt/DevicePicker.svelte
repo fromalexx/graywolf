@@ -1,6 +1,7 @@
 <!-- web/src/routes/ptt/DevicePicker.svelte -->
 <script>
   import { Badge } from '@chrissnell/chonky-ui';
+  import { truncatePath } from './format.js';
 
   // Device list with recommended/other split. Pure presentation:
   // parent supplies the filtered device array and current selection.
@@ -46,7 +47,7 @@
                 <Badge variant={typeBadgeVariant(d.type)}>{d.type}</Badge>
               </div>
               {#if d.path}
-                <span class="path">{d.path}</span>
+                <span class="path" title={d.path}>{truncatePath(d.path)}</span>
               {/if}
               {#if d.usb_vendor && d.usb_product}
                 <span class="usb">USB {d.usb_vendor}:{d.usb_product}</span>
@@ -74,7 +75,7 @@
                 <Badge variant={typeBadgeVariant(d.type)}>{d.type}</Badge>
               </div>
               {#if d.path}
-                <span class="path">{d.path}</span>
+                <span class="path" title={d.path}>{truncatePath(d.path)}</span>
               {/if}
               {#if d.warning}
                 <span class="warning">{d.warning}</span>
