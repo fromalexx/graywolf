@@ -7,6 +7,15 @@
 # route the body references via [text](link) markdown; renderer only
 # accepts internal #/... routes.
 
+- version: "0.13.8"
+  date: "2026-05-22"
+  style: info
+  schema_version: 1
+  title: "Android display fix"
+  body: |
+    Fixes oversized text on some Android phone screens. Nothing
+    changes on macOS, Linux, or Windows; no action needed.
+
 - version: "0.13.7"
   date: "2026-05-21"
   style: info
