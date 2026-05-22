@@ -278,6 +278,22 @@ jobs:
           echo "::error::Release ${GITHUB_REF_NAME} never appeared; check goreleaser job."
           exit 1
 
+      # Auto-upload the signed AAB to Play Internal Testing. Gated on the
+      # service-account secret so it safely skips (not fails) until the
+      # Google Cloud service account is created and stored as
+      # GRAYWOLF_PLAY_SERVICE_ACCOUNT_JSON. Lands in the Internal track
+      # only; humans promote to the closed beta track separately, so a
+      # CI tag never reaches external testers automatically.
+      - name: Upload AAB to Play Internal Testing
+        if: ${{ secrets.GRAYWOLF_PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GRAYWOLF_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.nw5w.graywolf
+          releaseFiles: staging/graywolf-*.aab
+          track: internal
+          status: completed
+
       - name: Upload signed AAB as workflow artifact (manual fallback)
         uses: actions/upload-artifact@v5
         with:
