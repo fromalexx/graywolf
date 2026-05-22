@@ -1204,6 +1204,7 @@ func (a *App) wireHTTP(ctx context.Context) error {
 		Version:       a.cfg.Version,
 		MapsCache:     mapsCache,
 		Catalog:       catalog,
+		Demo:          a.cfg.Demo,
 	})
 	if err != nil {
 		return fmt.Errorf("webapi new: %w", err)
