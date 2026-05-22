@@ -21,9 +21,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Released version to promote to the closed beta track (X.Y.Z, no v). Leave blank for a plain build re-run.'
+        description: 'Released version to promote to a testing track (X.Y.Z, no v). Leave blank for a plain build re-run.'
         required: false
         type: string
+      track:
+        description: 'Play track to promote into. alpha = closed testing (private beta); beta = open testing.'
+        required: false
+        default: alpha
+        type: choice
+        options:
+          - alpha
+          - beta
+          - internal
 
 permissions:
   # write required so the release-sign job can attach the signed AAB
@@ -315,14 +324,14 @@ jobs:
 
   # ------------------------------------------------------------------
   # promote-to-closed — manual (workflow_dispatch) promotion of an
-  # already-released version from Internal to the closed beta track
-  # (graywolf-beta). Keeping this a deliberate human action means a CI
-  # tag never auto-ships to the 15 external beta testers; you choose
-  # which build they get. Run from the Actions tab (or:
-  #   gh workflow run android.yml --field version=X.Y.Z).
+  # already-released version to a Play testing track (default: alpha =
+  # closed testing, the private beta). Keeping this a deliberate human
+  # action means a CI tag never auto-ships to external beta testers; you
+  # choose which build they get. Run from the Actions tab (or:
+  #   gh workflow run android.yml --field version=X.Y.Z --field track=alpha).
   # ------------------------------------------------------------------
   promote-to-closed:
-    name: Promote to closed beta (graywolf-beta)
+    name: Promote to testing track
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
     env:
@@ -349,12 +358,16 @@ jobs:
             --dir staging
           ls -la staging/
 
-      - name: Promote AAB to the closed beta track
+      - name: Promote AAB to the chosen testing track
         if: env.HAVE_PLAY_SA == 'true'
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.GRAYWOLF_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.nw5w.graywolf
           releaseFiles: staging/graywolf-*.aab
-          track: graywolf-beta
+          # Play track IDs are fixed: internal, alpha (closed testing),
+          # beta (open testing), production. A private 15-person beta is
+          # closed testing -> alpha. Defaults to alpha; override at
+          # dispatch time with --field track=...
+          track: ${{ github.event.inputs.track }}
           status: completed
