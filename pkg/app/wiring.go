@@ -280,9 +280,12 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	// so the dashboard and Channels page render populated. Only seeds when
 	// empty so re-launching against a populated demo DB is idempotent.
 	if a.cfg.Demo {
-		if cfgs, err := a.store.GetStationConfig(ctx); err != nil || cfgs.Callsign == "" {
-			_ = a.store.UpsertStationConfig(ctx, configstore.StationConfig{Callsign: "NW5W-8"})
-			a.logger.Info("demo: seeded station callsign", "callsign", "NW5W-8")
+		if cfgs, err := a.store.GetStationConfig(ctx); err == nil && cfgs.Callsign == "" {
+			if err := a.store.UpsertStationConfig(ctx, configstore.StationConfig{Callsign: "NW5W-8"}); err != nil {
+				a.logger.Warn("demo: seed callsign failed", "err", err)
+			} else {
+				a.logger.Info("demo: seeded station callsign", "callsign", "NW5W-8")
+			}
 		}
 		if chs, err := a.store.ListChannels(ctx); err == nil && len(chs) == 0 {
 			ch := &configstore.Channel{
@@ -295,7 +298,7 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 			if err := a.store.CreateChannel(ctx, ch); err != nil {
 				a.logger.Warn("demo: seed channel failed", "err", err)
 			} else {
-				a.logger.Info("demo: seeded channel", "name", ch.Name)
+				a.logger.Info("demo: seeded channel", "id", ch.ID, "name", ch.Name)
 			}
 		}
 	}
@@ -313,12 +316,14 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	}
 
 	if a.cfg.Demo {
-		a.stationCache.Update(demoseed.Stations())
-		for _, e := range demoseed.Packets() {
+		stations := demoseed.Stations()
+		packets := demoseed.Packets()
+		a.stationCache.Update(stations)
+		for _, e := range packets {
 			a.plog.Record(e)
 		}
 		a.logger.Info("demo: seeded station cache + packet log",
-			"stations", len(demoseed.Stations()), "packets", len(demoseed.Packets()))
+			"stations", len(stations), "packets", len(packets))
 	}
 
 	// --- Modem bridge (construction; Start happens later) --------------
