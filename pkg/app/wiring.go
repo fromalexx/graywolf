@@ -563,13 +563,14 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 	// inserts when the conversation table is empty.
 	if a.cfg.Demo && a.msgStore != nil {
 		if rollup, err := a.msgStore.ConversationRollup(ctx, 1); err == nil && len(rollup) == 0 {
-			for _, m := range demoseed.Messages() {
-				mm := m
+			msgs := demoseed.Messages()
+			for _, m := range msgs {
+				mm := m // copy to avoid taking the address of the loop variable
 				if err := a.msgStore.Insert(ctx, &mm); err != nil {
 					a.logger.Warn("demo: seed message failed", "err", err)
 				}
 			}
-			a.logger.Info("demo: seeded messages", "count", len(demoseed.Messages()))
+			a.logger.Info("demo: seeded messages", "count", len(msgs))
 		}
 	}
 
