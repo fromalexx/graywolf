@@ -74,6 +74,7 @@ type StatusChannel struct {
 // @Router   /status [get]
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if s.demo {
+		// Demo mode: serve canned counters without touching the store or runtime.
 		c := demoseed.StatusCounters()
 		writeJSON(w, http.StatusOK, StatusDTO{
 			UptimeSeconds: c.UptimeSeconds,

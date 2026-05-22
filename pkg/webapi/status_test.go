@@ -138,4 +138,7 @@ func TestHandleStatus_Demo(t *testing.T) {
 	if len(dto.Channels) == 0 || dto.Channels[0].RxFrames == 0 {
 		t.Error("demo should report a channel with non-zero RxFrames")
 	}
+	if dto.Igate == nil {
+		t.Error("demo should report an igate section")
+	}
 }
