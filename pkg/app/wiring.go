@@ -303,6 +303,7 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 					a.logger.Warn("demo: seed input device failed", "err", err)
 				} else {
 					inDevID = in.ID
+					a.logger.Info("demo: seeded input device", "id", inDevID)
 				}
 			}
 			if outDevID == 0 {
@@ -311,6 +312,7 @@ func (a *App) wireServicesInner(ctx context.Context) error {
 					a.logger.Warn("demo: seed output device failed", "err", err)
 				} else {
 					outDevID = out.ID
+					a.logger.Info("demo: seeded output device", "id", outDevID)
 				}
 			}
 		}
