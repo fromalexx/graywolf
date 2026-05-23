@@ -22,6 +22,8 @@
   import { toMaidenhead } from '../lib/map/maidenhead.js';
   import { fmtLat, fmtLon, timeAgo } from '../lib/map/popup-helpers.js';
   import { toasts } from '../lib/stores.js';
+  import MapPinPlus from 'lucide-svelte/icons/map-pin-plus';
+  import Copy from 'lucide-svelte/icons/copy';
 
   // Values are seconds (data store wants ms; multiplied at dispatch).
   const TIMERANGES_S = [
@@ -97,6 +99,11 @@
       toasts.error('Clipboard unavailable');
     }
   }
+  // Hemispheric coords shown once in the menu header; the copy items
+  // carry short labels so the menu stays narrow.
+  function ctxMenuHeader() {
+    return `${fmtLat(ctxMenu.lat)} ${fmtLon(ctxMenu.lon)}`;
+  }
   function ctxMenuItems() {
     const { lat, lon } = ctxMenu;
     const coords = `${fmtLat(lat)} ${fmtLon(lon)}`;
@@ -107,22 +114,29 @@
     const grid = toMaidenhead(lat, lon);
     return [
       {
-        label: 'Add fixed beacon here…',
+        label: 'Add fixed beacon here',
+        icon: MapPinPlus,
+        primary: true,
         onSelect: () => {
           const q = `lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`;
           window.location.hash = `#/beacons?${q}`;
         },
       },
+      { divider: true },
       {
-        label: `Copy coordinates (${coords})`,
+        label: 'Copy coordinates',
+        icon: Copy,
         onSelect: () => copyToClipboard(coords, 'Coordinates'),
       },
       {
-        label: `Copy decimal coordinates (${decimal})`,
+        label: 'Copy decimal',
+        icon: Copy,
         onSelect: () => copyToClipboard(decimal, 'Decimal coordinates'),
       },
       {
-        label: `Copy grid square (${grid})`,
+        label: 'Copy grid',
+        icon: Copy,
+        hint: grid,
         onSelect: () => copyToClipboard(grid, 'Grid square'),
       },
     ];
@@ -631,6 +645,7 @@
     open={ctxMenu.open}
     x={ctxMenu.x}
     y={ctxMenu.y}
+    header={ctxMenu.open ? ctxMenuHeader() : ''}
     items={ctxMenu.open ? ctxMenuItems() : []}
     onclose={closeCtxMenu}
   />
