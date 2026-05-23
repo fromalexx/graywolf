@@ -26,10 +26,11 @@
   // Clamp the menu inside the viewport so it doesn't get cut off when
   // right-clicking near the right or bottom edge. Computed in the effect
   // after the menu mounts (so we can measure its rect); until then it
-  // sits at the raw cursor position. Plain $state, not $derived, because
-  // the effect both reads x/y and writes the clamped result.
-  let adjustedX = $state(x);
-  let adjustedY = $state(y);
+  // sits at the raw cursor position. Seeded with 0 (not x/y) so it isn't
+  // a non-reactive capture of the prop -- the effect below sets the real
+  // value before paint, resetting to raw x/y until the rect is measurable.
+  let adjustedX = $state(0);
+  let adjustedY = $state(0);
   $effect(() => {
     if (!open || !menuEl || typeof window === 'undefined') {
       adjustedX = x;
