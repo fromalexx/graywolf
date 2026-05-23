@@ -29,10 +29,8 @@
   // or confirm, and on confirm retry the PUT with ?force=true
   // (same wire convention as ?cascade=true on DELETE).
   //
-  // No typed-name gate here. A PUT that breaks referrers is
-  // recoverable (the operator can edit again). A DELETE is not --
-  // that's why the delete flow carries the stronger gate. The
-  // referrer list itself is the confirmation surface.
+  // Like the delete flow, the referrer list itself is the confirmation
+  // surface -- there is no typed-name gate on either path.
   let putConfirmOpen = $state(false);
   let putReferrers = $state([]);
   let putPendingPayload = $state(null);

@@ -9,22 +9,18 @@
   // this component resets it to null on success or cancel.
   let { target = $bindable(), onDeleted } = $props();
 
-  // Phase 5 two-step delete flow (D12).
-  // Stage 1 ("impact") lists referrers grouped by type; the operator
-  // chooses to cancel or proceed to stage 2. Stage 2 ("confirm")
-  // requires typing the channel's exact name before the red button
-  // enables. An unreferenced channel skips stage 1 and goes straight
-  // to stage 2 with the same typed-name gate for consistency.
+  // Single-confirm delete flow.
+  // A referenced channel opens the "impact" dialog, which lists the
+  // referrers grouped by type and carries the final cascade-delete
+  // button (the list itself is the confirmation surface). An
+  // unreferenced channel opens a plain confirm dialog. Neither path
+  // requires retyping the channel name.
   let deleteImpactOpen = $state(false);
   let deleteConfirmOpen = $state(false);
   let deleteReferrers = $state([]);
-  let deleteNameInput = $state('');
   let deleteInFlight = $state(false);
   let deleteGroups = $derived(groupReferrers(deleteReferrers));
   let deleteTotal = $derived(totalReferrers(deleteReferrers));
-  let deleteNameMatches = $derived(
-    target != null && deleteNameInput.trim() === target.name
-  );
 
   // Edge-triggered open: fire openFlow ONCE per null→non-null transition of
   // target, mirroring the original one-shot imperative requestDelete call.
@@ -43,28 +39,19 @@
     }
   });
 
-  // Phase 5 two-step delete flow (D12).
-  //
   // Called when target becomes non-null:
   //   1. Fetch /api/channels/{id}/referrers.
-  //   2. Empty list: skip the impact dialog; open the typed-name
-  //      confirm dialog with cascade=false path.
-  //   3. Non-empty list: open the impact dialog first. From there the
-  //      operator clicks "Remove references…" to advance to the
-  //      typed-name confirm dialog with cascade=true.
-  //
-  // Either way, the final Delete button is enabled only when the
-  // operator types the channel's exact name. On confirm we call
-  // DELETE with or without ?cascade=true depending on the path.
+  //   2. Empty list: open the plain confirm dialog (cascade=false).
+  //   3. Non-empty list: open the impact dialog, whose Delete button
+  //      cascades (cascade=true). On confirm we call DELETE with or
+  //      without ?cascade=true depending on the path.
   async function openFlow(row) {
-    deleteNameInput = '';
     deleteReferrers = [];
     try {
       const resp = await api.get(`/channels/${row.id}/referrers`);
       const refs = Array.isArray(resp?.referrers) ? resp.referrers : [];
       deleteReferrers = refs;
       if (refs.length === 0) {
-        // Unreferenced — go straight to the typed-name confirm.
         deleteImpactOpen = false;
         deleteConfirmOpen = true;
       } else {
@@ -77,22 +64,15 @@
     }
   }
 
-  function proceedToConfirm() {
-    deleteImpactOpen = false;
-    deleteConfirmOpen = true;
-    deleteNameInput = '';
-  }
-
   function cancelDelete() {
     deleteImpactOpen = false;
     deleteConfirmOpen = false;
     target = null;
     deleteReferrers = [];
-    deleteNameInput = '';
   }
 
   async function executeDelete() {
-    if (!target || !deleteNameMatches) return;
+    if (!target) return;
     const cascade = deleteReferrers.length > 0;
     const id = target.id;
     deleteInFlight = true;
@@ -107,7 +87,6 @@
       deleteConfirmOpen = false;
       target = null;
       deleteReferrers = [];
-      deleteNameInput = '';
     } catch (err) {
       // A 409 here would mean a race (referrers appeared between our
       // GET and DELETE). Surface the same error channel; the impact
@@ -126,10 +105,10 @@
   }
 </script>
 
-<!-- Phase 5 two-step delete: stage 1 = impact dialog (only when the
-     channel has referrers). Lists what the cascade will do to each
-     dependent row, grouped by type, so the operator has an informed
-     sense of scope before hitting the typed-name gate. -->
+<!-- Impact dialog (only when the channel has referrers). Lists what the
+     cascade will do to each dependent row, grouped by type, so the
+     operator has an informed sense of scope. The Delete button here is
+     final and cascades. -->
 <AlertDialog bind:open={deleteImpactOpen}>
   <AlertDialog.Content>
     <AlertDialog.Title>Delete channel {target?.name ?? ''}?</AlertDialog.Title>
@@ -149,52 +128,32 @@
     </ul>
     <div class="modal-footer">
       <AlertDialog.Cancel onclick={cancelDelete}>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action class="secondary-action" onclick={proceedToConfirm}>
-        Remove references…
+      <AlertDialog.Action
+        class="danger-action"
+        onclick={executeDelete}
+        disabled={deleteInFlight}
+      >
+        Delete channel and {deleteTotal} reference{deleteTotal === 1 ? '' : 's'}
       </AlertDialog.Action>
     </div>
   </AlertDialog.Content>
 </AlertDialog>
 
-<!-- Phase 5 two-step delete: stage 2 = typed-name confirm. Fires for
-     unreferenced channels directly (no stage 1) and for referenced
-     channels after the operator clicks through the impact dialog.
-     The delete button only enables when the typed name matches exactly. -->
+<!-- Plain confirm dialog for an unreferenced channel. -->
 <AlertDialog bind:open={deleteConfirmOpen}>
   <AlertDialog.Content>
-    <AlertDialog.Title>
-      {#if deleteReferrers.length > 0}
-        Delete channel and {deleteTotal} reference{deleteTotal === 1 ? '' : 's'}
-      {:else}
-        Delete channel {target?.name ?? ''}?
-      {/if}
-    </AlertDialog.Title>
+    <AlertDialog.Title>Delete channel {target?.name ?? ''}?</AlertDialog.Title>
     <AlertDialog.Description>
-      This cannot be undone. To confirm, type the channel name exactly:
-      <strong>{target?.name ?? ''}</strong>
+      This cannot be undone.
     </AlertDialog.Description>
-    <label class="confirm-label">
-      Channel name
-      <input
-        type="text"
-        class="confirm-input"
-        bind:value={deleteNameInput}
-        autocomplete="off"
-        aria-label={`Type ${target?.name ?? ''} to confirm delete`}
-      />
-    </label>
     <div class="modal-footer">
       <AlertDialog.Cancel onclick={cancelDelete}>Cancel</AlertDialog.Cancel>
       <AlertDialog.Action
         class="danger-action"
         onclick={executeDelete}
-        disabled={!deleteNameMatches || deleteInFlight}
+        disabled={deleteInFlight}
       >
-        {#if deleteReferrers.length > 0}
-          Delete channel and {deleteTotal} reference{deleteTotal === 1 ? '' : 's'}
-        {:else}
-          Delete channel
-        {/if}
+        Delete channel
       </AlertDialog.Action>
     </div>
   </AlertDialog.Content>
@@ -235,36 +194,4 @@
   /* :global(.danger-action) is declared in ChannelPutConfirm.svelte; being
      :global it is document-wide and reaches this component's
      AlertDialog.Action slot too. */
-
-  /* :global(.secondary-action) — used only by the delete impact stage here;
-     moved out of Channels.svelte (no remaining use in parent). Declared
-     :global so it reaches the chonky-ui AlertDialog.Action slot. */
-  :global(.secondary-action) {
-    background: var(--bg-tertiary) !important;
-    color: var(--text-primary) !important;
-  }
-
-  /* confirm-label / confirm-input used only by delete stage 2; moved here. */
-  .confirm-label {
-    display: block;
-    margin: 12px 1.5rem 0 1.5rem;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-  .confirm-input {
-    display: block;
-    width: 100%;
-    margin-top: 4px;
-    padding: 8px 10px;
-    min-height: 40px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    color: var(--text-primary);
-    font: inherit;
-  }
-  .confirm-input:focus-visible {
-    outline: 2px solid var(--color-info, #388bfd);
-    outline-offset: -2px;
-  }
 </style>
