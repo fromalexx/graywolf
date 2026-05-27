@@ -236,23 +236,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/audio-devices/{id}/test-tone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Play test tone on audio device */
-        post: operations["playTestTone"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -549,6 +532,23 @@ export interface paths {
         get: operations["getChannelStats"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/channels/{id}/test-tx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a TX test signal (CW callsign or tone) on a channel */
+        post: operations["sendTestSignal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3006,7 +3006,12 @@ export interface components {
             message?: string;
             ok?: boolean;
         };
-        "dto.TestToneResponse": {
+        "dto.TestSignalRequest": {
+            /** @example cw */
+            signal?: string;
+        };
+        "dto.TestSignalResponse": {
+            /** @example sent */
             status?: string;
         };
         "dto.ThemeConfigRequest": {
@@ -4398,65 +4403,6 @@ export interface operations {
             };
         };
     };
-    playTestTone: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Audio device id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["dto.TestToneResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
-                };
-            };
-        };
-    };
     login: {
         parameters: {
             query?: never;
@@ -5661,6 +5607,70 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+        };
+    };
+    sendTestSignal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Channel ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        /** @description Signal to send */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["dto.TestSignalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["dto.TestSignalResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["webtypes.ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

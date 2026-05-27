@@ -33,6 +33,7 @@ const (
 	OpGetChannelStats     = "getChannelStats"
 	OpGetChannelReferrers = "getChannelReferrers"
 	OpManualPtt           = "manualPtt"
+	OpSendTestSignal      = "sendTestSignal"
 )
 
 // Beacons resource — /api/beacons (Phase 2).
@@ -56,9 +57,9 @@ const (
 
 // Audio devices resource — /api/audio-devices (Phase 2).
 //
-// Sub-resource endpoints (available, scan-levels, levels, test-tone,
-// gain) stay under the same tag. Operation IDs follow the
-// verbResource convention so generated clients read fluently
+// Sub-resource endpoints (available, scan-levels, levels, gain) stay
+// under the same tag. Operation IDs follow the verbResource convention
+// so generated clients read fluently
 // (client.listAvailableAudioDevices(), client.setAudioDeviceGain(...)).
 const (
 	OpListAudioDevices          = "listAudioDevices"
@@ -69,7 +70,6 @@ const (
 	OpListAvailableAudioDevices = "listAvailableAudioDevices"
 	OpScanAudioDeviceLevels     = "scanAudioDeviceLevels"
 	OpGetAudioDeviceLevels      = "getAudioDeviceLevels"
-	OpPlayTestTone              = "playTestTone"
 	OpSetAudioDeviceGain        = "setAudioDeviceGain"
 )
 
