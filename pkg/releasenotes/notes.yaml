@@ -7,6 +7,25 @@
 # route the body references via [text](link) markdown; renderer only
 # accepts internal #/... routes.
 
+- version: "0.13.11"
+  date: "2026-05-27"
+  style: info
+  schema_version: 1
+  link: "#/beacons"
+  title: "Object beacons, plus a transmit test for your channels"
+  body: |
+    Object beacons: you can now beacon a named object -- a repeater, a
+    hospital, an event site -- so it shows up on the map as "NAME (via
+    your callsign)", making it clear that you put it on the air. Pick
+    "Object" when you add or edit a beacon. This is the proper way to
+    do it, instead of overriding your station callsign.
+
+    Channel transmit test: every transmit-capable channel now has a
+    Test TX menu that sends a real signal out the radio -- your
+    callsign in Morse code, a steady 1200 or 2400 Hz tone, or an
+    alternating warble. Handy for checking your audio levels and PTT
+    keying. This replaces the old Test Tone button.
+
 - version: "0.13.10"
   date: "2026-05-23"
   style: info
