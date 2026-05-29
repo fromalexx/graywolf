@@ -1235,18 +1235,48 @@ func (a *App) wireHTTP(ctx context.Context) error {
 	// path on every download request. Token comes from the same place
 	// mapsCache reads it (singleton MapsConfig) so re-registration
 	// rotates the bearer for catalog fetches too.
-	catalog := mapscatalog.New(
+	catalog := mapscatalog.NewWithDiskCache(
 		mapscache.DefaultMapsBaseURL,
 		mapsTokenProvider,
 		time.Hour,
+		a.cfg.TileCacheDir,
 	)
-	// Best-effort warm; failures are non-fatal -- Get() will retry on
-	// the first request that needs the catalog.
+	// Warm the catalog in the background with exponential backoff,
+	// capped at 1 hour. Only emit a single state-change ERROR when we
+	// transition from healthy -> failing (and a single INFO when we
+	// recover); intermediate retries log at DEBUG so an offline Pi
+	// doesn't dominate the log buffer. The on-disk catalog.json keeps
+	// the picker functional while the warm-up retries.
 	go func() {
-		warmCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if _, err := catalog.Refresh(warmCtx); err != nil {
-			a.logger.Warn("maps catalog warm-up failed", "err", err)
+		backoff := 30 * time.Second
+		const maxBackoff = time.Hour
+		healthy := true
+		for {
+			warmCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_, err := catalog.Refresh(warmCtx)
+			cancel()
+			if err == nil {
+				if !healthy {
+					a.logger.Info("maps catalog reachable again")
+					healthy = true
+				}
+				return
+			}
+			if healthy {
+				a.logger.Error("maps catalog warm-up failed; will retry quietly", "err", err)
+				healthy = false
+			} else {
+				a.logger.Debug("maps catalog retry failed", "err", err, "next_retry_in", backoff)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
 		}
 	}()
 
@@ -1259,8 +1289,14 @@ func (a *App) wireHTTP(ctx context.Context) error {
 	if err := a.store.MigrateMapsDownloadSlugs(context.Background()); err != nil {
 		return fmt.Errorf("migrate maps_downloads slugs: %w", err)
 	}
+	if err := a.store.MigrateMapsDownloadBBox(context.Background()); err != nil {
+		return fmt.Errorf("migrate maps_downloads bbox column: %w", err)
+	}
 	if err := mapsCache.MigrateLegacyArchives(context.Background()); err != nil {
 		a.logger.Warn("legacy archive migration failed", "err", err)
+	}
+	if err := mapsCache.BackfillBBoxes(context.Background()); err != nil {
+		a.logger.Warn("bbox backfill failed", "err", err)
 	}
 
 	apiSrv, err := webapi.NewServer(webapi.Config{
